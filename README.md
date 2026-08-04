@@ -1,5 +1,7 @@
 # City Map Poster Generator
 
+> **Note:** This is a fork of the original [maptoposter](https://github.com/originalankur/maptoposter) project, maintained specifically to generate map posters and multi-monitor wallpapers of Val-d'Or, Québec.
+
 Generate beautiful, minimalist map posters for any city in the world.
 
 <img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250">
