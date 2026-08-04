@@ -1,0 +1,15 @@
+{
+  "name": "Gallery Mono",
+  "description": "Pure black outline on white - clean graphic poster that won't compete with a colored wall",
+  "bg": "#FFFFFF",
+  "text": "#111111",
+  "gradient_color": "#FFFFFF",
+  "water": "#D8D8D8",
+  "parks": "#EDEDED",
+  "road_motorway": "#111111",
+  "road_primary": "#2A2A2A",
+  "road_secondary": "#4A4A4A",
+  "road_tertiary": "#6E6E6E",
+  "road_residential": "#A8A8A8",
+  "road_default": "#6E6E6E"
+}

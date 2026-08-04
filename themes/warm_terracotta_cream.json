@@ -1,0 +1,15 @@
+{
+  "name": "Warm Terracotta Cream",
+  "description": "Cream background with black linework and a muted terracotta accent - echoes warm wood tones against white floor and walls",
+  "bg": "#F7F2EA",
+  "text": "#1E1B18",
+  "gradient_color": "#F7F2EA",
+  "water": "#D8CDBE",
+  "parks": "#E9E1D2",
+  "road_motorway": "#1E1B18",
+  "road_primary": "#8C4B32",
+  "road_secondary": "#B06A46",
+  "road_tertiary": "#C58A64",
+  "road_residential": "#DAB292",
+  "road_default": "#C58A64"
+}

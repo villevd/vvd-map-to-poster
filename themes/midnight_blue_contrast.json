@@ -1,0 +1,18 @@
+{
+  "name": "Midnight Blue Contrast",
+  "description": "High-contrast take on Midnight Blue - near-black navy background with luminous, glowing gold roads",
+  "bg": "#070D1A",
+  "text": "#D4AF37",
+  "gradient_color": "#070D1A",
+  "water": "#0D2A52",
+  "parks": "#142C48",
+  "road_motorway": "#FFF6DA",
+  "road_primary": "#FFE066",
+  "road_secondary": "#FFC833",
+  "road_tertiary": "#E8A93D",
+  "road_residential": "#C79A5E",
+  "road_default": "#E8A93D",
+  "railway": "#FF7A5C",
+  "building": "#132646",
+  "glow": true
+}

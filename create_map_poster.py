@@ -197,6 +197,8 @@ def load_theme(theme_name="terracotta"):
             "road_tertiary": "#D9A08A",
             "road_residential": "#E5C4B0",
             "road_default": "#D9A08A",
+            "railway": "#8B4513",
+            "building": "#EADFD3",
         }
 
     with open(theme_file, "r", encoding=FILE_ENCODING) as f:
@@ -314,6 +316,24 @@ def get_edge_widths_by_type(g):
         edge_widths.append(width)
 
     return edge_widths
+
+
+def draw_road_glow(ax, g_proj, edge_colors, edge_widths, bgcolor):
+    """
+    Draws soft halos beneath the road network by re-plotting the same edges
+    progressively wider and more transparent. Gives bright roads a luminous
+    look on dark themes instead of sitting flat against the background.
+    """
+    for width_mult, alpha in ((7.0, 0.05), (4.0, 0.09), (2.2, 0.16)):
+        ox.plot_graph(
+            g_proj, ax=ax, bgcolor=bgcolor,
+            node_size=0,
+            edge_color=edge_colors,
+            edge_linewidth=[w * width_mult for w in edge_widths],
+            edge_alpha=alpha,
+            show=False,
+            close=False,
+        )
 
 
 def get_coordinates(city, country):
@@ -493,6 +513,10 @@ def create_poster(
     display_city=None,
     display_country=None,
     fonts=None,
+    include_railways=True,
+    include_buildings=True,
+    include_labels=True,
+    include_gradient=True,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -523,8 +547,9 @@ def create_poster(
     print(f"\nGenerating map for {city}, {country}...")
 
     # Progress bar for data fetching
+    total_steps = 3 + int(include_railways) + int(include_buildings)
     with tqdm(
-        total=3,
+        total=total_steps,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -557,6 +582,30 @@ def create_poster(
         )
         pbar.update(1)
 
+        # 4. Fetch Railways (optional layer)
+        railways = None
+        if include_railways:
+            pbar.set_description("Downloading railways")
+            railways = fetch_features(
+                point,
+                compensated_dist,
+                tags={"railway": "rail"},
+                name="railways",
+            )
+            pbar.update(1)
+
+        # 5. Fetch Buildings (optional layer)
+        buildings = None
+        if include_buildings:
+            pbar.set_description("Downloading buildings")
+            buildings = fetch_features(
+                point,
+                compensated_dist,
+                tags={"building": True},
+                name="buildings",
+            )
+            pbar.update(1)
+
     print("✓ All data retrieved successfully!")
 
     # 2. Setup Plot
@@ -574,23 +623,33 @@ def create_poster(
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            # Project water features in the same CRS as the graph
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
-                water_polys = water_polys.to_crs(g_proj.graph['crs'])
+            # Project water features into the SAME CRS as the graph (not an
+            # independently auto-picked UTM zone, which can differ near zone
+            # boundaries and silently plot the layer off-canvas)
+            water_polys = water_polys.to_crs(g_proj.graph['crs'])
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            # Project park features in the same CRS as the graph
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
-                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
+            # Project park features into the same CRS as the graph (see water note above)
+            parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+
+    if buildings is not None and not buildings.empty:
+        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
+        building_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not building_polys.empty:
+            # Project building features into the same CRS as the graph (see water note above)
+            building_polys = building_polys.to_crs(g_proj.graph['crs'])
+            building_polys.plot(
+                ax=ax,
+                facecolor=THEME.get('building', THEME['parks']),
+                edgecolor='none',
+                zorder=0.9,
+            )
+
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -598,6 +657,11 @@ def create_poster(
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
+
+    # Soft glow halos beneath the roads (theme-controlled, e.g. midnight_blue_contrast)
+    if THEME.get('glow'):
+        draw_road_glow(ax, g_proj, edge_colors, edge_widths, THEME['bg'])
+
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
         g_proj, ax=ax, bgcolor=THEME['bg'],
@@ -611,9 +675,24 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
+    # Layer 2b: Railways (plotted above roads so the line is visible crossing them)
+    if railways is not None and not railways.empty:
+        railway_lines = railways[railways.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not railway_lines.empty:
+            # Project railway features into the same CRS as the graph (see water note above)
+            railway_lines = railway_lines.to_crs(g_proj.graph['crs'])
+            railway_lines.plot(
+                ax=ax,
+                color=THEME.get('railway', THEME['road_default']),
+                linewidth=0.8,
+                linestyle=(0, (4, 2)),
+                zorder=1.5,
+            )
+
     # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+    if include_gradient:
+        create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
+        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
     # Calculate scale factor based on smaller dimension (reference 12 inches)
     # This ensures text scales properly for both portrait and landscape orientations
@@ -622,8 +701,6 @@ def create_poster(
     # Base font sizes (at 12 inches width)
     base_main = 60
     base_sub = 22
-    base_coords = 14
-    base_attr = 8
 
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
@@ -632,28 +709,18 @@ def create_poster(
         font_sub = FontProperties(
             fname=active_fonts["light"], size=base_sub * scale_factor
         )
-        font_coords = FontProperties(
-            fname=active_fonts["regular"], size=base_coords * scale_factor
-        )
-        font_attr = FontProperties(
-            fname=active_fonts["light"], size=base_attr * scale_factor
-        )
     else:
         # Fallback to system fonts
         font_sub = FontProperties(
             family="monospace", weight="normal", size=base_sub * scale_factor
         )
-        font_coords = FontProperties(
-            family="monospace", size=base_coords * scale_factor
-        )
-        font_attr = FontProperties(family="monospace", size=base_attr * scale_factor)
 
     # Format city name based on script type
     # Latin scripts: apply uppercase and letter spacing for aesthetic
     # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
     if is_latin_script(display_city):
-        # Latin script: uppercase with letter spacing (e.g., "P  A  R  I  S")
-        spaced_city = "  ".join(list(display_city.upper()))
+        # Latin script: uppercase with letter spacing (e.g., "P A R I S")
+        spaced_city = " ".join(list(display_city.upper()))
     else:
         # Non-Latin script: no spacing, no forced uppercase
         # For scripts like Arabic, Thai, Japanese, etc.
@@ -681,76 +748,28 @@ def create_poster(
         )
 
     # --- BOTTOM TEXT ---
-    ax.text(
-        0.5,
-        0.14,
-        spaced_city,
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_main_adjusted,
-        zorder=11,
-    )
+    if include_labels:
+        ax.text(
+            0.5,
+            0.14,
+            spaced_city,
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_main_adjusted,
+            zorder=11,
+        )
 
-    ax.text(
-        0.5,
-        0.10,
-        display_country.upper(),
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_sub,
-        zorder=11,
-    )
-
-    lat, lon = point
-    coords = (
-        f"{lat:.4f}° N / {lon:.4f}° E"
-        if lat >= 0
-        else f"{abs(lat):.4f}° S / {lon:.4f}° E"
-    )
-    if lon < 0:
-        coords = coords.replace("E", "W")
-
-    ax.text(
-        0.5,
-        0.07,
-        coords,
-        transform=ax.transAxes,
-        color=THEME["text"],
-        alpha=0.7,
-        ha="center",
-        fontproperties=font_coords,
-        zorder=11,
-    )
-
-    ax.plot(
-        [0.4, 0.6],
-        [0.125, 0.125],
-        transform=ax.transAxes,
-        color=THEME["text"],
-        linewidth=1 * scale_factor,
-        zorder=11,
-    )
-
-    # --- ATTRIBUTION (bottom right) ---
-    if FONTS:
-        font_attr = FontProperties(fname=FONTS["light"], size=8)
-    else:
-        font_attr = FontProperties(family="monospace", size=8)
-
-    ax.text(
-        0.98,
-        0.02,
-        "© OpenStreetMap contributors",
-        transform=ax.transAxes,
-        color=THEME["text"],
-        alpha=0.5,
-        ha="right",
-        va="bottom",
-        fontproperties=font_attr,
-        zorder=11,
-    )
+        ax.text(
+            0.5,
+            0.10,
+            display_country.upper(),
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_sub,
+            zorder=11,
+        )
 
     # 5. Save
     print(f"Saving to {output_file}...")
@@ -955,6 +974,32 @@ Examples:
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
+    parser.add_argument(
+        "--no-railways",
+        dest="railways",
+        action="store_false",
+        help="Disable the railway line layer (enabled by default)",
+    )
+    parser.add_argument(
+        "--no-buildings",
+        dest="buildings",
+        action="store_false",
+        help="Disable the building footprint layer (enabled by default)",
+    )
+    parser.add_argument(
+        "--no-labels",
+        dest="labels",
+        action="store_false",
+        help="Disable the city/country title text (useful for tiled/panorama panels)",
+    )
+    parser.add_argument(
+        "--no-gradient",
+        dest="gradient",
+        action="store_false",
+        help="Disable the top/bottom vignette fade (useful for tiled/panorama panels, "
+             "where each panel's fade would otherwise double up at the seams)",
+    )
+    parser.set_defaults(railways=True, buildings=True, labels=True, gradient=True)
 
     args = parser.parse_args()
 
@@ -1037,6 +1082,10 @@ Examples:
                 display_city=args.display_city,
                 display_country=args.display_country,
                 fonts=custom_fonts,
+                include_railways=args.railways,
+                include_buildings=args.buildings,
+                include_labels=args.labels,
+                include_gradient=args.gradient,
             )
 
         print("\n" + "=" * 50)

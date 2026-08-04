@@ -1,0 +1,15 @@
+{
+  "name": "Sage Ink",
+  "description": "Off-white background with black linework and a tame sage green accent - blends into a white wall / sage decor",
+  "bg": "#FAFAF7",
+  "text": "#1C1C1C",
+  "gradient_color": "#FAFAF7",
+  "water": "#C7D3C6",
+  "parks": "#E4E9E0",
+  "road_motorway": "#1C1C1C",
+  "road_primary": "#3F4A3D",
+  "road_secondary": "#6B7A64",
+  "road_tertiary": "#8FA087",
+  "road_residential": "#B7C2AE",
+  "road_default": "#8FA087"
+}
