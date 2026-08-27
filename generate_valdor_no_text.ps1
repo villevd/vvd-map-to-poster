@@ -7,7 +7,7 @@
     applied so the "VAL-D'OR / CANADA" text is omitted from the output.
 
 .PARAMETER Theme
-    Theme name from the themes/ folder. Default: midnight_blue
+    Theme name from the themes folder. Default: midnight_blue
 
 .PARAMETER Distance
     Map radius in meters. Default: 18000
@@ -30,41 +30,44 @@ param(
     [double]$Height = 16
 )
 
-$ErrorActionPreference = "Stop"
+# NOTE: intentionally not setting $ErrorActionPreference = "Stop" here.
+# Windows PowerShell treats a native exe's stderr output as a terminating
+# error under "Stop", which cut off python's real traceback last time.
 
-try {
-    # Always run from the script's own directory, regardless of caller's cwd
-    $ProjectRoot = $PSScriptRoot
-    Set-Location $ProjectRoot
+$ProjectRoot = $PSScriptRoot
+Set-Location $ProjectRoot
 
-    $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
-    if (Test-Path $VenvPython) {
-        $Python = $VenvPython
-    } else {
-        Write-Warning "No .venv found at $VenvPython — falling back to system 'python'."
-        $Python = "python"
-    }
-
-    & $Python "create_map_poster.py" `
-        --city "Val-d'Or" `
-        --country "Canada" `
-        --theme $Theme `
-        --distance $Distance `
-        --width $Width `
-        --height $Height `
-        --no-labels
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Poster generation failed (exit code $LASTEXITCODE)."
-    }
-
-    Write-Host "`nDone. Check the posters\ folder for the output PNG." -ForegroundColor Green
+if (Test-Path $VenvPython) {
+    $Python = $VenvPython
+} else {
+    Write-Warning "No .venv found at $VenvPython - falling back to system 'python'."
+    $Python = "python"
 }
-catch {
-    Write-Host "`nERROR: $_" -ForegroundColor Red
+
+$CityName = "Val-d'Or"
+
+$PyArgs = @(
+    "create_map_poster.py",
+    "--city", $CityName,
+    "--country", "Canada",
+    "--theme", $Theme,
+    "--distance", $Distance,
+    "--width", $Width,
+    "--height", $Height,
+    "--no-labels"
+)
+
+& $Python $PyArgs
+$ExitCode = $LASTEXITCODE
+
+Write-Host ""
+if ($ExitCode -ne 0) {
+    Write-Host "Poster generation failed (exit code $ExitCode). See output above for details." -ForegroundColor Red
+} else {
+    Write-Host "Done. Check the posters folder for the output PNG." -ForegroundColor Green
 }
-finally {
-    Write-Host "`nPress any key to close..."
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-}
+
+Write-Host ""
+Read-Host "Press Enter to close"
