@@ -223,6 +223,14 @@ python create_map_poster.py -c "Paris" -C "France" -t noir --3d -d 2000 --3d-out
 A 3D model covers much less ground than a flat poster: use `-d 1000`-`2500` (the model is a `2 x d` metre square).
 Outputs are saved next to the posters as `{city}_{theme}_3d_{timestamp}.{png,html,glb,stl}`.
 
+### 3D GUI
+
+Prefer clicking to typing? Double-click `launch_gui.bat` (or run `python -m map3d.gui`). It opens a page in your browser
+where you choose a city, theme, radius and layers, press **Generate**, watch the progress, and the interactive 3D model
+opens right there. Previous models are listed so you can reopen them instantly, with download links for any PNG / GLB /
+STL saved alongside. It runs only on your own machine (127.0.0.1, standard library only) and calls the same
+`--3d` command line underneath.
+
 **Data sources** (all free, no API key; each one that fails is skipped and the others carry on):
 
 | Source | Used for |
@@ -304,7 +312,8 @@ Create a JSON file in `themes/` directory:
 map_poster/
 ├── create_map_poster.py    # Main script
 ├── font_management.py      # Font loading and Google Fonts integration
-├── map3d/                  # 3D models: data providers, geometry, renderer, GLB/STL/HTML export
+├── map3d/                  # 3D models: data providers, geometry, renderer, GLB/STL/HTML export, local GUI
+├── launch_gui.bat          # Opens the 3D GUI (python -m map3d.gui)
 ├── themes/                 # Theme JSON files
 ├── fonts/                  # Font files
 │   ├── Roboto-*.ttf        # Default Roboto fonts

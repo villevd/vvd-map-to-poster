@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Outputs: rendered poster (same themes/typography), self-contained interactive three.js viewer (`.html`), colored `.glb`
   and print-scaled `.stl`. New options: `--3d-outputs`, `--azimuth`, `--elevation`, `--exaggeration`, `--zoom`,
   `--print-size`, `--no-trees`, `--no-terrain`, `--no-overture`. Offline tests in `test/test_map3d.py`.
+- **3D GUI** - `launch_gui.bat` / `python -m map3d.gui`: a local browser page (stdlib only, 127.0.0.1) to generate 3D models,
+  watch progress, view them interactively and reopen previous ones.
 
 ### Changed
 - `--distance` now defaults per mode: 18000 m for flat posters (unchanged), 1500 m with `--3d`.

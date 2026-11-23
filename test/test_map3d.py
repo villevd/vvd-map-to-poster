@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from map3d import buildings as bld  # noqa: E402
 from map3d import ground as gnd  # noqa: E402
 from map3d.data import BUILDING_COLUMNS, parse_length  # noqa: E402
+from map3d import gui  # noqa: E402
 from map3d.export import export_glb, export_stl  # noqa: E402
 from map3d.mesh import Scene  # noqa: E402
 from map3d.viewer import export_html  # noqa: E402
@@ -157,6 +158,50 @@ class Exporters(unittest.TestCase):
         self.assertIn('id="cfg"', html)
         self.assertNotIn("__DATA__", html)
         self.assertNotIn("<city>", html)       # title is escaped
+
+
+class GuiValidation(unittest.TestCase):
+    THEMES = ["noir", "midnight_blue", "midnight_blue_contrast"]
+
+    def cmd(self, **kw):
+        params = {"city": "Val-d'Or", "country": "Canada", "theme": "noir", "distance": 1500, "exaggeration": 1.5}
+        params.update(kw)
+        return gui.build_command(params, self.THEMES)
+
+    def test_command_uses_equals_form_so_text_cannot_become_a_flag(self):
+        cmd = self.cmd(city="--help", country="-d 1")
+        self.assertIn("--city=--help", cmd)
+        self.assertIn("--country=-d 1", cmd)
+        self.assertIn("--3d", cmd)
+        self.assertIn("--3d-outputs=html", cmd)          # the viewer is always produced
+
+    def test_layers_and_outputs(self):
+        cmd = self.cmd(trees=False, overture=False, outputs=["glb", "bogus", "stl"])
+        self.assertIn("--no-trees", cmd)
+        self.assertIn("--no-overture", cmd)
+        self.assertNotIn("--no-buildings", cmd)
+        self.assertIn("--3d-outputs=html,glb,stl", cmd)
+
+    def test_rejects_bad_input(self):
+        for bad in ({"theme": "../../etc"}, {"city": ""}, {"city": "x" * 200}, {"distance": 999999},
+                    {"exaggeration": "tall"}, {"latitude": "48.1", "longitude": "abc"}, {"latitude": "48.1"}):
+            with self.assertRaises(gui.BadRequest, msg=bad):
+                self.cmd(**bad)
+
+    def test_exact_centre_accepted(self):
+        cmd = self.cmd(latitude="48.1023", longitude="-77.7876")
+        self.assertIn("--latitude=48.1023", cmd)
+        self.assertIn("--longitude=-77.7876", cmd)
+
+    def test_model_names_with_underscored_themes(self):
+        got = gui.split_model_name("val-d'or_midnight_blue_contrast_3d_20261123_103338", self.THEMES)
+        self.assertEqual(got, ("val-d'or", "midnight_blue_contrast", "20261123_103338"))
+        got = gui.split_model_name("new_york_noir_3d_20260101_000000", self.THEMES)
+        self.assertEqual(got, ("new york", "noir", "20260101_000000"))
+
+    def test_only_plain_poster_files_are_served(self):
+        for bad in ("../create_map_poster.py", "..\\x.html", "a/b.html", "", "create_map_poster.py", "notes.txt"):
+            self.assertIsNone(gui.safe_file(bad), bad)
 
 
 if __name__ == "__main__":
