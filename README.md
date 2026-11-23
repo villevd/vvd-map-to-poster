@@ -76,7 +76,7 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (use with --latitude) | |
 | **OPTIONAL:** `--country-label` | | Override country text displayed on poster | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | terracotta |
-| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
+| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 (1500 with `--3d`) |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
@@ -195,6 +195,47 @@ python create_map_poster.py --list-themes
 python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
 ```
 
+### 3D City Models (`--3d`)
+
+Turn any city into a 3D model: real terrain, extruded buildings with pitched roofs, bridges, water, parks, forests and
+trees, on a plinth like a physical city model. The same themes, fonts and typography apply.
+
+```bash
+# Rendered poster + interactive viewer (default outputs)
+python create_map_poster.py -c "Val-d'Or" -C "Canada" -t terracotta --3d
+
+# Everything: poster, interactive viewer, colored GLB (Blender/Quick Look), print-ready STL
+python create_map_poster.py -c "Paris" -C "France" -t noir --3d -d 2000 --3d-outputs poster,html,glb,stl
+```
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--3d` | Build a 3D model instead of a flat poster | |
+| `--3d-outputs` | Any of `poster` (rendered image), `html` (interactive viewer), `glb` (colored model), `stl` (3D printing) | `poster,html` |
+| `--azimuth` | Camera compass bearing in degrees (180 = looking north from the south) | 225 |
+| `--elevation` | Camera angle above the horizon in degrees | 45 |
+| `--exaggeration` | Vertical exaggeration of relief, buildings and trees | 1.5 |
+| `--zoom` | Crop in on the model in the rendered poster | 1 |
+| `--print-size` | Width of the STL model in millimetres | 200 |
+| `--no-trees`, `--no-terrain`, `--no-buildings`, `--no-railways` | Leave a layer out | |
+| `--no-overture` | OpenStreetMap only | |
+
+A 3D model covers much less ground than a flat poster: use `-d 1000`-`2500` (the model is a `2 x d` metre square).
+Outputs are saved next to the posters as `{city}_{theme}_3d_{timestamp}.{png,html,glb,stl}`.
+
+**Data sources** (all free, no API key; each one that fails is skipped and the others carry on):
+
+| Source | Used for |
+|--------|----------|
+| OpenStreetMap (via OSMnx) | Buildings with `height` / `building:levels` / `roof:shape` / `building:part`, streets, bridges, water, parks, forests, trees, railways |
+| [Overture Maps](https://overturemaps.org) (optional: `pip install pyarrow`) | Extra building footprints (Microsoft / Google ML) and heights, water, land cover, and the full road network when OpenStreetMap is unreachable |
+| AWS Terrain Tiles | Elevation: a global blend of SRTM, NRCan CDEM, USGS 3DEP, EU-DEM and others |
+
+Buildings without a mapped height get one estimated from their type and footprint. Themes work unchanged; to fine-tune
+the 3D look add optional keys to a theme JSON: `ground`, `forest`, `tree`, `building_3d`, `frame`, `skirt`, `bridge`.
+The interactive `.html` viewer needs internet access (it loads three.js from a CDN); it has orbit/zoom, real-time sun
+shadows, layer toggles, vertical exaggeration and sun controls, and a PNG snapshot button.
+
 ### Distance Guide
 
 | Distance | Best for |
@@ -263,6 +304,7 @@ Create a JSON file in `themes/` directory:
 map_poster/
 ├── create_map_poster.py    # Main script
 ├── font_management.py      # Font loading and Google Fonts integration
+├── map3d/                  # 3D models: data providers, geometry, renderer, GLB/STL/HTML export
 ├── themes/                 # Theme JSON files
 ├── fonts/                  # Font files
 │   ├── Roboto-*.ttf        # Default Roboto fonts

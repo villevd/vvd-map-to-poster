@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Community Contributions
 
 ### Added
+- **3D city models** (`--3d`) - new `map3d/` package. Builds terrain, extruded buildings (pitched roofs for houses),
+  bridges, water, parks, forests and trees from OpenStreetMap, Overture Maps (optional, `pyarrow`) and AWS Terrain Tiles.
+  Outputs: rendered poster (same themes/typography), self-contained interactive three.js viewer (`.html`), colored `.glb`
+  and print-scaled `.stl`. New options: `--3d-outputs`, `--azimuth`, `--elevation`, `--exaggeration`, `--zoom`,
+  `--print-size`, `--no-trees`, `--no-terrain`, `--no-overture`. Offline tests in `test/test_map3d.py`.
+
+### Changed
+- `--distance` now defaults per mode: 18000 m for flat posters (unchanged), 1500 m with `--3d`.
+- Poster typography moved into `add_poster_labels()` so 2D and 3D posters share it (2D output is unchanged).
+
+### Added (community)
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
   - Added `uv.lock` for reproducible builds

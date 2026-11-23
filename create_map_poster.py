@@ -22,6 +22,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
+import requests
 from geopandas import GeoDataFrame
 from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
@@ -426,6 +427,19 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
+def _graph_cache_key(point, dist) -> str:
+    """Cache key of a street-network download (shared by fetch_graph and the 3D cache-first lookup)."""
+    lat, lon = point
+    return f"graph_{lat}_{lon}_{dist}"
+
+
+def _features_cache_key(point, dist, tags, name) -> str:
+    """Cache key of an OSM feature download (shared by fetch_features and the 3D cache-first lookup)."""
+    lat, lon = point
+    tag_str = "_".join(tags.keys())
+    return f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -441,7 +455,7 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
         MultiDiGraph of street network, or None if fetch fails
     """
     lat, lon = point
-    graph = f"graph_{lat}_{lon}_{dist}"
+    graph = _graph_cache_key(point, dist)
     cached = cache_get(graph)
     if cached is not None:
         print("✓ Using cached street network")
@@ -477,9 +491,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     Returns:
         GeoDataFrame of features, or None if fetch fails
     """
-    lat, lon = point
-    tag_str = "_".join(tags.keys())
-    features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+    features = _features_cache_key(point, dist, tags, name)
     cached = cache_get(features)
     if cached is not None:
         print(f"✓ Using cached {name}")
@@ -497,6 +509,92 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     except Exception as e:
         print(f"OSMnx error while fetching features: {e}")
         return None
+
+
+def add_poster_labels(ax, display_city, display_country, fonts, width, height, include_labels=True):
+    """
+    Draw the city name and country at the bottom of a poster axes.
+
+    Shared by the flat 2D poster and the 3D render, so both get identical
+    typography. Positions use axes coordinates (0-1) so they work for any
+    poster size.
+    """
+    # Calculate scale factor based on smaller dimension (reference 12 inches)
+    # This ensures text scales properly for both portrait and landscape orientations
+    scale_factor = min(height, width) / 12.0
+
+    # Base font sizes (at 12 inches width)
+    base_main = 60
+    base_sub = 22
+
+    # Typography - use custom fonts if provided, otherwise use default FONTS
+    active_fonts = fonts or FONTS
+    if active_fonts:
+        # font_main is calculated dynamically later based on length
+        font_sub = FontProperties(
+            fname=active_fonts["light"], size=base_sub * scale_factor
+        )
+    else:
+        # Fallback to system fonts
+        font_sub = FontProperties(
+            family="monospace", weight="normal", size=base_sub * scale_factor
+        )
+
+    # Format city name based on script type
+    # Latin scripts: apply uppercase and letter spacing for aesthetic
+    # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
+    if is_latin_script(display_city):
+        # Latin script: uppercase with letter spacing (e.g., "P A R I S")
+        spaced_city = " ".join(list(display_city.upper()))
+    else:
+        # Non-Latin script: no spacing, no forced uppercase
+        # For scripts like Arabic, Thai, Japanese, etc.
+        spaced_city = display_city
+
+    # Dynamically adjust font size based on city name length to prevent truncation
+    # We use the already scaled "main" font size as the starting point.
+    base_adjusted_main = base_main * scale_factor
+    city_char_count = len(display_city)
+
+    # Heuristic: If length is > 10, start reducing.
+    if city_char_count > 10:
+        length_factor = 10 / city_char_count
+        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+    else:
+        adjusted_font_size = base_adjusted_main
+
+    if active_fonts:
+        font_main_adjusted = FontProperties(
+            fname=active_fonts["bold"], size=adjusted_font_size
+        )
+    else:
+        font_main_adjusted = FontProperties(
+            family="monospace", weight="bold", size=adjusted_font_size
+        )
+
+    # --- BOTTOM TEXT ---
+    if include_labels:
+        ax.text(
+            0.5,
+            0.14,
+            spaced_city,
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_main_adjusted,
+            zorder=11,
+        )
+
+        ax.text(
+            0.5,
+            0.10,
+            display_country.upper(),
+            transform=ax.transAxes,
+            color=THEME["text"],
+            ha="center",
+            fontproperties=font_sub,
+            zorder=11,
+        )
 
 
 def create_poster(
@@ -694,82 +792,8 @@ def create_poster(
         create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
         create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
-    # Calculate scale factor based on smaller dimension (reference 12 inches)
-    # This ensures text scales properly for both portrait and landscape orientations
-    scale_factor = min(height, width) / 12.0
-
-    # Base font sizes (at 12 inches width)
-    base_main = 60
-    base_sub = 22
-
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
-    active_fonts = fonts or FONTS
-    if active_fonts:
-        # font_main is calculated dynamically later based on length
-        font_sub = FontProperties(
-            fname=active_fonts["light"], size=base_sub * scale_factor
-        )
-    else:
-        # Fallback to system fonts
-        font_sub = FontProperties(
-            family="monospace", weight="normal", size=base_sub * scale_factor
-        )
-
-    # Format city name based on script type
-    # Latin scripts: apply uppercase and letter spacing for aesthetic
-    # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
-    if is_latin_script(display_city):
-        # Latin script: uppercase with letter spacing (e.g., "P A R I S")
-        spaced_city = " ".join(list(display_city.upper()))
-    else:
-        # Non-Latin script: no spacing, no forced uppercase
-        # For scripts like Arabic, Thai, Japanese, etc.
-        spaced_city = display_city
-
-    # Dynamically adjust font size based on city name length to prevent truncation
-    # We use the already scaled "main" font size as the starting point.
-    base_adjusted_main = base_main * scale_factor
-    city_char_count = len(display_city)
-
-    # Heuristic: If length is > 10, start reducing.
-    if city_char_count > 10:
-        length_factor = 10 / city_char_count
-        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
-    else:
-        adjusted_font_size = base_adjusted_main
-
-    if active_fonts:
-        font_main_adjusted = FontProperties(
-            fname=active_fonts["bold"], size=adjusted_font_size
-        )
-    else:
-        font_main_adjusted = FontProperties(
-            family="monospace", weight="bold", size=adjusted_font_size
-        )
-
-    # --- BOTTOM TEXT ---
-    if include_labels:
-        ax.text(
-            0.5,
-            0.14,
-            spaced_city,
-            transform=ax.transAxes,
-            color=THEME["text"],
-            ha="center",
-            fontproperties=font_main_adjusted,
-            zorder=11,
-        )
-
-        ax.text(
-            0.5,
-            0.10,
-            display_country.upper(),
-            transform=ax.transAxes,
-            color=THEME["text"],
-            ha="center",
-            fontproperties=font_sub,
-            zorder=11,
-        )
+    # 4. Typography (city + country at the bottom of the poster)
+    add_poster_labels(ax, display_city, display_country, fonts, width, height, include_labels)
 
     # 5. Save
     print(f"Saving to {output_file}...")
@@ -789,6 +813,212 @@ def create_poster(
 
     plt.close()
     print(f"✓ Done! Poster saved as {output_file}")
+
+
+DEFAULT_DISTANCE_2D = 18000
+DEFAULT_DISTANCE_3D = 1500          # a 3D model is about buildings, so it covers a much smaller area
+THREE_D_OUTPUTS = ("poster", "html", "glb", "stl")
+
+
+def _overpass_reachable(timeout=8):
+    """Quick health probe of the Overpass endpoint OSMnx will use."""
+    url = ox.settings.overpass_url.rstrip("/") + "/status"
+    try:
+        r = requests.get(url, timeout=timeout, headers={"User-Agent": "city_map_poster"})
+        return r.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def _fetch_with_retries(fetch_once, what, state):
+    """
+    Run a network fetcher that returns None on failure, with a fast failure mode.
+
+    The public Overpass servers are often busy or down, and OSMnx waits minutes
+    on a dead one. So the first network request probes the server for a few
+    seconds; if it does not answer, every remaining request is skipped. If it
+    does answer, a failing request is retried a couple of times.
+    """
+    if state.get("down"):
+        return None
+    if not state.get("probed"):
+        state["probed"] = True
+        if not _overpass_reachable():
+            state["down"] = True
+            return None
+    for attempt in range(3):
+        result = fetch_once()
+        if result is not None:
+            return result
+        if attempt < 2:
+            wait = 6 * (attempt + 1)
+            print(f"  ↻ {what}: retrying in {wait}s...")
+            time.sleep(wait)
+    state["down"] = True
+    return None
+
+
+def build_scene_3d(
+    city,
+    point,
+    dist,
+    exaggeration=1.5,
+    azimuth=225.0,
+    include_buildings=True,
+    include_trees=True,
+    include_railways=True,
+    include_terrain=True,
+    use_overture=True,
+):
+    """
+    Fetch every available data source around ``point`` and build the 3D scene.
+
+    Sources, merged by geometric overlap: OpenStreetMap (OSMnx) for buildings,
+    streets, water and vegetation; Overture Maps for extra building footprints,
+    heights, land cover and roads (optional, needs ``pyarrow``); AWS Terrain
+    Tiles for elevation. Any source that is unreachable is skipped with a
+    warning and the others carry on. The scene is theme independent, so it can
+    be rendered once per theme.
+
+    Args:
+        city: Name used as the scene title
+        point: (latitude, longitude) of the model centre
+        dist: Half the side of the square model, in meters
+        exaggeration: Vertical exaggeration of relief, buildings and trees
+        azimuth: Compass bearing of the camera; ground shadows are baked for a light placed to its left
+    """
+    from map3d.data import Providers, collect
+    from map3d.geo import LocalFrame
+    from map3d.scene import SceneOptions, build_scene
+    from map3d.terrain import Dem, fetch_dem
+
+    lat, lon = point
+    frame = LocalFrame(lat, lon, dist)
+    osm_dist = dist * 1.06      # a little beyond the tile so nothing is cut short at the edges
+    state = {"down": False}
+
+    def cached_or_fetch(key, fetch_once, what):
+        # A warm cache never needs the network, even when Overpass is down
+        try:
+            cached = cache_get(key)
+        except CacheError:
+            cached = None
+        if cached is not None:
+            return cached
+        return _fetch_with_retries(fetch_once, what, state)
+
+    def osm_features(name, tags):
+        return cached_or_fetch(
+            _features_cache_key(point, osm_dist, tags, name),
+            lambda: fetch_features(point, osm_dist, tags, name),
+            f"OpenStreetMap {name}",
+        )
+
+    def osm_graph():
+        return cached_or_fetch(
+            _graph_cache_key(point, osm_dist),
+            lambda: fetch_graph(point, osm_dist),
+            "OpenStreetMap streets",
+        )
+
+    print(f"\nCollecting data for a {2 * dist / 1000:.1f} x {2 * dist / 1000:.1f} km 3D model of {city}...")
+    providers = Providers(
+        osm_features=osm_features, osm_graph=osm_graph, overture=use_overture, cache_dir=CACHE_DIR_PATH
+    )
+    data = collect(frame, providers, want_trees=include_trees, want_rails=include_railways)
+    if state["down"]:
+        print("⚠ OpenStreetMap (Overpass) did not answer; continuing with the other providers.")
+    if not len(data.buildings) and not len(data.roads):
+        raise RuntimeError(
+            "No map data could be retrieved (OpenStreetMap is unreachable and Overture Maps is unavailable). "
+            "Try again later, or install pyarrow to enable Overture Maps."
+        )
+
+    if include_terrain:
+        try:
+            dem = fetch_dem(frame, CACHE_DIR_PATH)
+        except Exception as e:
+            print(f"⚠ Terrain unavailable ({e}); the model will be flat.")
+            dem = Dem.flat(frame)
+    else:
+        dem = Dem.flat(frame)
+
+    options = SceneOptions(
+        exaggeration=exaggeration,
+        buildings=include_buildings,
+        trees=include_trees,
+        rails=include_railways,
+        light_bearing=(azimuth + 45.0) % 360.0,
+        light_elevation=40.0,
+    )
+    return build_scene(frame, data, dem, options, title=city)
+
+
+def create_poster_3d(
+    scene,
+    city,
+    country,
+    output_file,
+    output_format,
+    width=12,
+    height=16,
+    outputs=("poster", "html"),
+    azimuth=225.0,
+    elevation=45.0,
+    zoom=1.0,
+    display_city=None,
+    display_country=None,
+    fonts=None,
+    include_labels=True,
+    print_size=200.0,
+):
+    """
+    Render a 3D scene with the current theme and write the requested outputs.
+
+    Args:
+        scene: Scene from build_scene_3d()
+        output_file: Path for the poster image; other outputs reuse its name with their own extension
+        output_format: 'png', 'svg' or 'pdf' for the poster image
+        outputs: Any of 'poster' (rendered image with title), 'html' (interactive viewer),
+                 'glb' (colored 3D model) and 'stl' (print-ready geometry)
+        azimuth / elevation / zoom: Camera for the poster image and the viewer's starting view
+        print_size: Width of the STL model in millimetres
+    """
+    from map3d.export import export_glb, export_stl
+    from map3d.render import Camera, render_scene
+    from map3d.scene import credits_text
+    from map3d.viewer import export_html
+
+    display_city = display_city or city
+    display_country = display_country or country
+    base = os.path.splitext(output_file)[0]
+    credits = credits_text(scene)
+    written = []
+
+    if "poster" in outputs:
+        print("Rendering 3D poster...")
+        fig, ax = render_scene(scene, THEME, width, height, Camera(azimuth, elevation, zoom=zoom))
+        add_poster_labels(ax, display_city, display_country, fonts, width, height, include_labels)
+        fmt = output_format.lower()
+        save_kwargs = dict(facecolor=THEME["bg"])
+        if fmt == "png":
+            save_kwargs["dpi"] = 300
+        plt.savefig(output_file, format=fmt, **save_kwargs)
+        plt.close(fig)
+        written.append(output_file)
+
+    if "html" in outputs:
+        written.append(str(export_html(
+            scene, THEME, base + ".html", title=display_city, subtitle=display_country,
+            azimuth=azimuth, elevation=elevation, credits=credits,
+        )))
+    if "glb" in outputs:
+        written.append(str(export_glb(scene, THEME, base + ".glb", credits=credits)))
+    if "stl" in outputs:
+        written.append(str(export_stl(scene, base + ".stl", size_mm=print_size)))
+
+    for path in written:
+        print(f"✓ Saved {path} ({os.path.getsize(path) / 1_048_576:.1f} MB)")
 
 
 def print_examples():
@@ -930,8 +1160,8 @@ Examples:
         "--distance",
         "-d",
         type=int,
-        default=18000,
-        help="Map radius in meters (default: 18000)",
+        default=None,
+        help=f"Map radius in meters (default: {DEFAULT_DISTANCE_2D}, or {DEFAULT_DISTANCE_3D} with --3d)",
     )
     parser.add_argument(
         "--width",
@@ -999,7 +1229,71 @@ Examples:
         help="Disable the top/bottom vignette fade (useful for tiled/panorama panels, "
              "where each panel's fade would otherwise double up at the seams)",
     )
-    parser.set_defaults(railways=True, buildings=True, labels=True, gradient=True)
+    parser.add_argument(
+        "--3d",
+        dest="three_d",
+        action="store_true",
+        help="Build a 3D city model (terrain, extruded buildings, trees, bridges) instead of a flat poster",
+    )
+    parser.add_argument(
+        "--3d-outputs",
+        dest="outputs",
+        type=str,
+        default="poster,html",
+        help="With --3d: comma-separated outputs from poster (rendered image), html (interactive viewer), "
+             "glb (colored 3D model), stl (3D-printing geometry). Default: poster,html",
+    )
+    parser.add_argument(
+        "--azimuth",
+        type=float,
+        default=225.0,
+        help="With --3d: compass bearing of the camera in degrees; 180 looks north from the south (default: 225)",
+    )
+    parser.add_argument(
+        "--elevation",
+        type=float,
+        default=45.0,
+        help="With --3d: camera height angle in degrees, 90 is straight down (default: 45)",
+    )
+    parser.add_argument(
+        "--exaggeration",
+        type=float,
+        default=1.5,
+        help="With --3d: vertical exaggeration of terrain, buildings and trees (default: 1.5)",
+    )
+    parser.add_argument(
+        "--zoom",
+        type=float,
+        default=1.0,
+        help="With --3d: >1 crops in on the model in the rendered poster (default: 1)",
+    )
+    parser.add_argument(
+        "--print-size",
+        dest="print_size",
+        type=float,
+        default=200.0,
+        help="With --3d and the stl output: width of the printed model in millimetres (default: 200)",
+    )
+    parser.add_argument(
+        "--no-trees",
+        dest="trees",
+        action="store_false",
+        help="With --3d: leave out trees",
+    )
+    parser.add_argument(
+        "--no-terrain",
+        dest="terrain",
+        action="store_false",
+        help="With --3d: flat ground instead of real elevation",
+    )
+    parser.add_argument(
+        "--no-overture",
+        dest="overture",
+        action="store_false",
+        help="With --3d: use OpenStreetMap only, skip Overture Maps footprints/heights/land cover",
+    )
+    parser.set_defaults(railways=True, buildings=True, labels=True, gradient=True, trees=True, terrain=True,
+                        overture=True)
 
     args = parser.parse_args()
 
@@ -1030,6 +1324,27 @@ Examples:
             f"⚠ Height {args.height} exceeds the maximum allowed limit of 20. It's enforced as max limit 20."
         )
         args.height = 20.0
+
+    outputs_3d = [o.strip().lower() for o in args.outputs.split(",") if o.strip()]
+    if args.three_d:
+        unknown = [o for o in outputs_3d if o not in THREE_D_OUTPUTS]
+        if unknown or not outputs_3d:
+            print(f"Error: unknown --3d-outputs {unknown or args.outputs!r}. Choose from: {', '.join(THREE_D_OUTPUTS)}")
+            sys.exit(1)
+        if not 5 <= args.elevation <= 90:
+            print("Error: --elevation must be between 5 and 90 degrees.")
+            sys.exit(1)
+        if not 0.1 <= args.exaggeration <= 8:
+            print("Error: --exaggeration must be between 0.1 and 8.")
+            sys.exit(1)
+        if args.zoom <= 0:
+            print("Error: --zoom must be positive.")
+            sys.exit(1)
+    if args.distance is None:
+        args.distance = DEFAULT_DISTANCE_3D if args.three_d else DEFAULT_DISTANCE_2D
+    if args.three_d and args.distance > 4000:
+        print(f"⚠ A {args.distance} m radius is large for a 3D model: expect heavy downloads, slow builds and "
+              f"hundreds of thousands of buildings. {DEFAULT_DISTANCE_3D}-2500 m works best.")
 
     available_themes = get_available_themes()
     if not available_themes:
@@ -1066,8 +1381,44 @@ Examples:
         else:
             coords = get_coordinates(args.city, args.country)
 
+        if args.three_d:
+            # The 3D scene does not depend on the theme: build it once, then render it per theme
+            scene_3d = build_scene_3d(
+                args.city,
+                coords,
+                args.distance,
+                exaggeration=args.exaggeration,
+                azimuth=args.azimuth,
+                include_buildings=args.buildings,
+                include_trees=args.trees,
+                include_railways=args.railways,
+                include_terrain=args.terrain,
+                use_overture=args.overture,
+            )
+
         for theme_name in themes_to_generate:
             THEME = load_theme(theme_name)
+            if args.three_d:
+                output_file = generate_output_filename(args.city, f"{theme_name}_3d", args.format)
+                create_poster_3d(
+                    scene_3d,
+                    args.city,
+                    args.country,
+                    output_file,
+                    args.format,
+                    args.width,
+                    args.height,
+                    outputs=outputs_3d,
+                    azimuth=args.azimuth,
+                    elevation=args.elevation,
+                    zoom=args.zoom,
+                    display_city=args.display_city or args.city,
+                    display_country=args.display_country or args.country_label or args.country,
+                    fonts=custom_fonts,
+                    include_labels=args.labels,
+                    print_size=args.print_size,
+                )
+                continue
             output_file = generate_output_filename(args.city, theme_name, args.format)
             create_poster(
                 args.city,
@@ -1089,7 +1440,7 @@ Examples:
             )
 
         print("\n" + "=" * 50)
-        print("✓ Poster generation complete!")
+        print("✓ 3D model generation complete!" if args.three_d else "✓ Poster generation complete!")
         print("=" * 50)
 
     except Exception as e:
