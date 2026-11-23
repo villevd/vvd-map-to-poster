@@ -9,6 +9,8 @@ high-quality poster-ready images with roads, water features, and parks.
 
 import argparse
 import asyncio
+import functools
+import hashlib
 import json
 import os
 import pickle
@@ -858,17 +860,88 @@ def _fetch_with_retries(fetch_once, what, state):
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def _map3d_stamp() -> str:
+    """Fingerprint of the 3D code: cached models are reused only while the code that made them is unchanged."""
+    h = hashlib.sha1()
+    for f in sorted(Path(__file__).with_name("map3d").glob("*")):
+        if f.suffix in (".py", ".js"):
+            h.update(f.name.encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+def _cache_digest(*parts) -> str:
+    return hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _cache_try_get(key):
+    try:
+        return cache_get(key)
+    except CacheError:
+        return None
+
+
+def _cache_try_set(key, value):
+    try:
+        cache_set(key, value)
+    except CacheError:
+        pass
+
+
 def build_scene_3d(
     city,
     point,
     dist,
     exaggeration=1.5,
     azimuth=225.0,
+    building_exaggeration=None,
     include_buildings=True,
     include_trees=True,
     include_railways=True,
     include_terrain=True,
     use_overture=True,
+    include_traffic=True,
+    tiles=1,
+):
+    """
+    Build the 3D scene, or load the identical one built earlier.
+
+    Three cache levels, fastest first: the finished scene (same area and settings: instant), the processed
+    map data and terrain (same area, other heights or layers: skips every download and the parsing), and the
+    raw downloads (OpenStreetMap, Overture, elevation tiles), which never expire.
+    """
+    lat, lon = point
+    options = dict(exaggeration=exaggeration, azimuth=azimuth, building_exaggeration=building_exaggeration,
+                   include_buildings=include_buildings, include_trees=include_trees, include_railways=include_railways,
+                   include_terrain=include_terrain, use_overture=use_overture, include_traffic=include_traffic,
+                   tiles=tiles)
+    key = "scene3d_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(dist), city,
+                                      sorted(options.items(), key=lambda kv: kv[0]))
+    scene = _cache_try_get(key)
+    if scene is not None:
+        print(f"Step 1/1 - This exact model was built before: loaded from the cache in an instant "
+              f"({scene.n_faces:,} triangles).")
+        return scene
+    scene = _build_scene_3d_impl(city, point, dist, **options)
+    _cache_try_set(key, scene)
+    return scene
+
+
+def _build_scene_3d_impl(
+    city,
+    point,
+    dist,
+    exaggeration=1.5,
+    azimuth=225.0,
+    building_exaggeration=None,
+    include_buildings=True,
+    include_trees=True,
+    include_railways=True,
+    include_terrain=True,
+    use_overture=True,
+    include_traffic=True,
+    tiles=1,
 ):
     """
     Fetch every available data source around ``point`` and build the 3D scene.
@@ -883,18 +956,21 @@ def build_scene_3d(
     Args:
         city: Name used as the scene title
         point: (latitude, longitude) of the model centre
-        dist: Half the side of the square model, in meters
-        exaggeration: Vertical exaggeration of relief, buildings and trees
+        dist: Half the side of one square tile, in meters
+        tiles: Build a tiles x tiles grid (1 = a single model). Grids get detail levels in the viewer
+        exaggeration: Vertical exaggeration of the terrain
         azimuth: Compass bearing of the camera; ground shadows are baked for a light placed to its left
+        building_exaggeration: Vertical exaggeration of buildings and trees; None uses ``exaggeration``
     """
     from map3d.data import Providers, collect
     from map3d.geo import LocalFrame
-    from map3d.scene import SceneOptions, build_scene
+    from map3d.scene import SceneOptions, build_scene, build_tiled_scene
     from map3d.terrain import Dem, fetch_dem
 
     lat, lon = point
-    frame = LocalFrame(lat, lon, dist)
-    osm_dist = dist * 1.06      # a little beyond the tile so nothing is cut short at the edges
+    total = dist * tiles                     # half the side of the whole area
+    frame = LocalFrame(lat, lon, total)
+    osm_dist = total * 1.06      # a little beyond the tile so nothing is cut short at the edges
     state = {"down": False}
 
     def cached_or_fetch(key, fetch_once, what):
@@ -921,13 +997,26 @@ def build_scene_3d(
             "OpenStreetMap streets",
         )
 
-    print(f"\nCollecting data for a {2 * dist / 1000:.1f} x {2 * dist / 1000:.1f} km 3D model of {city}...")
+    print(f"\nCollecting data for a {2 * total / 1000:.1f} x {2 * total / 1000:.1f} km 3D model of {city}"
+          + (f" ({tiles} x {tiles} tiles)..." if tiles > 1 else "..."))
     providers = Providers(
         osm_features=osm_features, osm_graph=osm_graph, overture=use_overture, cache_dir=CACHE_DIR_PATH
     )
-    data = collect(frame, providers, want_trees=include_trees, want_rails=include_railways)
+    data_key = "city3d_data_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(total),
+                                               bool(include_trees), bool(include_railways), bool(include_traffic),
+                                               bool(use_overture))
+    data = _cache_try_get(data_key)
+    if data is not None:
+        print("Step 1/3 - Map data for this area was processed before: reusing it (no download, no parsing).")
+        state_cached = True
+    else:
+        state_cached = False
+        data = collect(frame, providers, want_trees=include_trees, want_rails=include_railways,
+                       want_traffic=include_traffic)
     if state["down"]:
         print("⚠ OpenStreetMap (Overpass) did not answer; continuing with the other providers.")
+    elif not state_cached and (len(data.buildings) or len(data.roads)):
+        _cache_try_set(data_key, data)       # only a complete download is worth keeping
     if not len(data.buildings) and not len(data.roads):
         raise RuntimeError(
             "No map data could be retrieved (OpenStreetMap is unreachable and Overture Maps is unavailable). "
@@ -935,8 +1024,15 @@ def build_scene_3d(
         )
 
     if include_terrain:
+        dem_key = "city3d_dem_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(total))
+        dem = _cache_try_get(dem_key)
         try:
-            dem = fetch_dem(frame, CACHE_DIR_PATH)
+            if dem is None:
+                print("Step 2/3 - Downloading elevation data (terrain heights)...")
+                dem = fetch_dem(frame, CACHE_DIR_PATH)
+                _cache_try_set(dem_key, dem)
+            else:
+                print("Step 2/3 - Terrain heights for this area were loaded from the cache.")
         except Exception as e:
             print(f"⚠ Terrain unavailable ({e}); the model will be flat.")
             dem = Dem.flat(frame)
@@ -945,13 +1041,29 @@ def build_scene_3d(
 
     options = SceneOptions(
         exaggeration=exaggeration,
+        building_exaggeration=building_exaggeration,
         buildings=include_buildings,
         trees=include_trees,
         rails=include_railways,
+        traffic=include_traffic,
         light_bearing=(azimuth + 45.0) % 360.0,
         light_elevation=40.0,
     )
+    if tiles > 1:
+        return build_tiled_scene(frame, data, dem, options, tiles, title=city)
     return build_scene(frame, data, dem, options, title=city)
+
+
+def _all_themes():
+    """Every theme in themes/ as {id: dict}, so the 3D viewer can switch between them live."""
+    out = {}
+    for name in get_available_themes():
+        try:
+            with open(os.path.join(THEMES_DIR, f"{name}.json"), "r", encoding=FILE_ENCODING) as f:
+                out[name] = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return out
 
 
 def create_poster_3d(
@@ -971,6 +1083,7 @@ def create_poster_3d(
     fonts=None,
     include_labels=True,
     print_size=200.0,
+    theme_name="",
 ):
     """
     Render a 3D scene with the current theme and write the requested outputs.
@@ -1008,9 +1121,11 @@ def create_poster_3d(
         written.append(output_file)
 
     if "html" in outputs:
+        print("Writing the interactive 3D page: compressing the model, adding every theme, embedding traffic and search...")
         written.append(str(export_html(
             scene, THEME, base + ".html", title=display_city, subtitle=display_country,
             azimuth=azimuth, elevation=elevation, credits=credits,
+            themes=_all_themes(), theme_id=theme_name,
         )))
     if "glb" in outputs:
         written.append(str(export_glb(scene, THEME, base + ".glb", credits=credits)))
@@ -1259,7 +1374,13 @@ Examples:
         "--exaggeration",
         type=float,
         default=1.5,
-        help="With --3d: vertical exaggeration of terrain, buildings and trees (default: 1.5)",
+        help="With --3d: vertical exaggeration of the terrain (default: 1.5)",
+    )
+    parser.add_argument(
+        "--building-exaggeration",
+        type=float,
+        default=None,
+        help="With --3d: vertical exaggeration of buildings and trees (default: same as --exaggeration)",
     )
     parser.add_argument(
         "--zoom",
@@ -1275,10 +1396,23 @@ Examples:
         help="With --3d and the stl output: width of the printed model in millimetres (default: 200)",
     )
     parser.add_argument(
+        "--tiles",
+        type=int,
+        default=1,
+        help="With --3d: build a TILES x TILES grid, each tile --distance metres from centre to edge, so a larger "
+             "area stays detailed. The viewer loads tiles on demand and simplifies distant ones (default: 1)",
+    )
+    parser.add_argument(
         "--no-trees",
         dest="trees",
         action="store_false",
         help="With --3d: leave out trees",
+    )
+    parser.add_argument(
+        "--no-traffic",
+        dest="traffic",
+        action="store_false",
+        help="With --3d: leave out the animated cars that stop at traffic signals and stop signs",
     )
     parser.add_argument(
         "--no-terrain",
@@ -1293,7 +1427,7 @@ Examples:
         help="With --3d: use OpenStreetMap only, skip Overture Maps footprints/heights/land cover",
     )
     parser.set_defaults(railways=True, buildings=True, labels=True, gradient=True, trees=True, terrain=True,
-                        overture=True)
+                        overture=True, traffic=True)
 
     args = parser.parse_args()
 
@@ -1337,11 +1471,21 @@ Examples:
         if not 0.1 <= args.exaggeration <= 8:
             print("Error: --exaggeration must be between 0.1 and 8.")
             sys.exit(1)
+        if args.building_exaggeration is not None and not 0.1 <= args.building_exaggeration <= 8:
+            print("Error: --building-exaggeration must be between 0.1 and 8.")
+            sys.exit(1)
         if args.zoom <= 0:
             print("Error: --zoom must be positive.")
             sys.exit(1)
+        if not 1 <= args.tiles <= 7:
+            print("Error: --tiles must be between 1 and 7.")
+            sys.exit(1)
     if args.distance is None:
         args.distance = DEFAULT_DISTANCE_3D if args.three_d else DEFAULT_DISTANCE_2D
+    if args.three_d and args.tiles > 3:
+        print(f"⚠ {args.tiles} x {args.tiles} tiles is a very large model "
+              f"({args.tiles * args.distance * 2 / 1000:.0f} km across): expect long builds and big files; "
+              "the poster image is the slowest part, so consider --3d-outputs html.")
     if args.three_d and args.distance > 4000:
         print(f"⚠ A {args.distance} m radius is large for a 3D model: expect heavy downloads, slow builds and "
               f"hundreds of thousands of buildings. {DEFAULT_DISTANCE_3D}-2500 m works best.")
@@ -1388,12 +1532,15 @@ Examples:
                 coords,
                 args.distance,
                 exaggeration=args.exaggeration,
+                building_exaggeration=args.building_exaggeration,
                 azimuth=args.azimuth,
                 include_buildings=args.buildings,
                 include_trees=args.trees,
                 include_railways=args.railways,
                 include_terrain=args.terrain,
                 use_overture=args.overture,
+                tiles=args.tiles,
+                include_traffic=args.traffic,
             )
 
         for theme_name in themes_to_generate:
@@ -1417,6 +1564,7 @@ Examples:
                     fonts=custom_fonts,
                     include_labels=args.labels,
                     print_size=args.print_size,
+                    theme_name=theme_name,
                 )
                 continue
             output_file = generate_output_filename(args.city, theme_name, args.format)

@@ -64,7 +64,7 @@ def export_glb(scene: Scene, theme: dict, path: str | Path, credits: str = "") -
         return len(accessors) - 1
 
     for mesh in scene.meshes:
-        if mesh.n_faces == 0 or mesh.role not in colors:
+        if mesh.n_faces == 0 or mesh.lod > 0 or mesh.role not in colors:
             continue
         pos = _y_up(mesh.vertices)
         base = colors[mesh.role]
@@ -127,7 +127,7 @@ def export_stl(scene: Scene, path: str | Path, size_mm: float = 200.0) -> Path:
     zmin = scene.z_range[0]
     tris = []
     for mesh in scene.meshes:
-        if mesh.n_faces == 0 or mesh.role in STL_SKIP_ROLES:
+        if mesh.n_faces == 0 or mesh.lod > 0 or mesh.role in STL_SKIP_ROLES:
             continue
         v = mesh.vertices.astype(np.float64).copy()
         v[:, 2] -= zmin

@@ -106,7 +106,7 @@ def render_scene(scene: Scene, theme: dict, width: float, height: float, cam: Ca
     xy_parts, col_parts, key_parts = [], [], []
     n_total = 0
     for mesh in scene.meshes:
-        if mesh.n_faces == 0 or mesh.role not in colors:
+        if mesh.n_faces == 0 or mesh.lod > 0 or mesh.role not in colors:
             continue
         tri = mesh.vertices[mesh.faces].astype(np.float64)               # (M, 3, 3)
         fn = mesh.face_normals()

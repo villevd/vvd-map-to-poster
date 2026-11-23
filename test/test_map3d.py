@@ -6,6 +6,7 @@ Run from the project root:  python -m unittest discover -s test -p "test_*.py" -
 
 import json
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -159,6 +160,24 @@ class Exporters(unittest.TestCase):
         self.assertNotIn("__DATA__", html)
         self.assertNotIn("<city>", html)       # title is escaped
 
+    def test_html_has_place_search_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = export_html(self.scene, THEME, os.path.join(d, "m.html"), title="Test", subtitle="Canada")
+            html = p.read_text(encoding="utf-8")
+        self.assertIn('id="find"', html)
+        cfg = json.loads(re.search(r'<script type="application/json" id="cfg">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(cfg["geo"]["place"], "Test, Canada")
+        self.assertAlmostEqual(cfg["geo"]["half"], self.scene.half)
+
+
+class RoadExport(unittest.TestCase):
+    def test_centre_lines_go_to_viewer_frame(self):
+        from map3d.viewer import _road_cfg
+        # scene frame: x east, y north, z height -> viewer frame: x east, y height, z = -north
+        path = np.array([[0.0, 10.0, 100.0], [5.0, 20.0, 101.0]], dtype=np.float32)
+        flat = _road_cfg([path, np.array([[1.0, 2.0, 3.0]], dtype=np.float32)])   # a single point is dropped
+        self.assertEqual(flat, [[0.0, 100.0, -10.0, 5.0, 101.0, -20.0]])
+
 
 class GuiValidation(unittest.TestCase):
     THEMES = ["noir", "midnight_blue", "midnight_blue_contrast"]
@@ -182,11 +201,22 @@ class GuiValidation(unittest.TestCase):
         self.assertNotIn("--no-buildings", cmd)
         self.assertIn("--3d-outputs=html,glb,stl", cmd)
 
+    def test_terrain_and_building_exaggeration_are_separate_flags(self):
+        cmd = self.cmd(exaggeration=1.2, building_exaggeration=2.5)
+        self.assertIn("--exaggeration=1.2", cmd)
+        self.assertIn("--building-exaggeration=2.5", cmd)
+
     def test_rejects_bad_input(self):
         for bad in ({"theme": "../../etc"}, {"city": ""}, {"city": "x" * 200}, {"distance": 999999},
                     {"exaggeration": "tall"}, {"latitude": "48.1", "longitude": "abc"}, {"latitude": "48.1"}):
             with self.assertRaises(gui.BadRequest, msg=bad):
                 self.cmd(**bad)
+
+    def test_tiles_option(self):
+        self.assertIn("--tiles=3", self.cmd(tiles=3))
+        for bad in (0, 8, "many"):
+            with self.assertRaises(gui.BadRequest, msg=bad):
+                self.cmd(tiles=bad)
 
     def test_exact_centre_accepted(self):
         cmd = self.cmd(latitude="48.1023", longitude="-77.7876")
@@ -202,6 +232,101 @@ class GuiValidation(unittest.TestCase):
     def test_only_plain_poster_files_are_served(self):
         for bad in ("../create_map_poster.py", "..\\x.html", "a/b.html", "", "create_map_poster.py", "notes.txt"):
             self.assertIsNone(gui.safe_file(bad), bad)
+
+
+class Tiling(unittest.TestCase):
+    """A tiles x tiles model: every building lands in exactly one tile, tiles share one ground datum."""
+
+    @classmethod
+    def setUpClass(cls):
+        from map3d.data import CityData, tile_data
+        from map3d.geo import LocalFrame
+        from map3d.scene import SceneOptions, build_tiled_scene
+        from map3d.terrain import Dem
+        cls.tile_data = staticmethod(tile_data)
+        half = 200.0                                     # whole area is 400 m wide, 2 x 2 tiles of 200 m
+        homes = [Polygon([(x, y), (x + 10, y), (x + 10, y + 8), (x, y + 8)])
+                 for x in (-150, -50, 50, 150 - 10) for y in (-150, -50, 50, 150 - 8)]
+        cls.buildings = make_buildings(homes, kind="house", height=6.0)
+        frame = LocalFrame(48.1, -77.8, half)
+        data = CityData(buildings=cls.buildings, water=np.asarray([], dtype=object), forest=np.asarray([box(-190, -190, -60, 60)], dtype=object),
+                        parks=np.asarray([], dtype=object), roads=gpd.GeoDataFrame({"cls": [], "bridge": []}, geometry=[]),
+                        rails=np.asarray([], dtype=object), trees=np.zeros((0, 2)))
+        n = 25
+        x0 = -half - 20.0
+        z = 100.0 + 0.05 * (np.arange(n)[None, :] * 20.0 + x0) + 0.0 * np.arange(n)[:, None]    # gentle west-east slope
+        dem = Dem(x0, x0, 20.0, z, "synthetic")
+        cls.scene = build_tiled_scene(frame, data, dem, SceneOptions(shadows=False), tiles=2, log=lambda *_: None)
+
+    def test_every_building_lives_in_exactly_one_tile(self):
+        from map3d.data import CityData
+        data = CityData(buildings=self.buildings, water=np.asarray([], dtype=object), forest=np.asarray([], dtype=object),
+                        parks=np.asarray([], dtype=object), roads=None, rails=np.asarray([], dtype=object), trees=np.zeros((0, 2)))
+        counts = [len(self.tile_data(data, cx, cy, 100.0).buildings) for cx in (-100.0, 100.0) for cy in (-100.0, 100.0)]
+        self.assertEqual(sum(counts), len(self.buildings))
+        self.assertTrue(all(c > 0 for c in counts))
+
+    def test_chunks_and_detail_levels(self):
+        chunks = {tuple(m.tags["chunk"]) for m in self.scene.meshes}
+        self.assertEqual(chunks, {(0, 0), (1, 0), (0, 1), (1, 1)})
+        for chunk in chunks:
+            levels = {m.lod for m in self.scene.meshes if tuple(m.tags["chunk"]) == chunk}
+            self.assertEqual(levels, {0, 1, 2})
+
+    def test_far_levels_are_lighter(self):
+        def faces(lod):
+            return sum(m.n_faces for m in self.scene.meshes if m.lod == lod)
+        self.assertLess(faces(2), faces(1))
+        self.assertLess(faces(1), faces(0))
+
+    def test_tiles_are_placed_side_by_side_on_one_datum(self):
+        xs = np.concatenate([m.vertices[:, 0] for m in self.scene.meshes if m.lod == 0 and m.role == "ground"])
+        self.assertAlmostEqual(float(xs.min()), -200.0, delta=1.0)
+        self.assertAlmostEqual(float(xs.max()), 200.0, delta=1.0)
+        # the west-east slope must continue across the seam: the east tile sits higher than the west tile
+
+        def mean_ground(chunk):
+            m = [m for m in self.scene.meshes if m.lod == 0 and m.role == "ground" and tuple(m.tags["chunk"]) == chunk][0]
+            return float(m.vertices[:, 2].mean())
+        self.assertGreater(mean_ground((1, 0)), mean_ground((0, 0)) + 3.0)
+
+    def test_medium_level_swaps_trees_for_impostors(self):
+        imp = [m for m in self.scene.meshes if "impostors" in m.tags]
+        self.assertTrue(imp)
+        self.assertTrue(all(m.lod == 1 and m.n_faces == 0 for m in imp))
+        self.assertEqual(imp[0].tags["impostors"].shape[1], 6)
+        self.assertFalse([m for m in self.scene.meshes if m.lod == 1 and m.role == "tree" and m.n_faces])
+
+    def test_static_outputs_ignore_coarser_levels(self):
+        with tempfile.TemporaryDirectory() as d:
+            stl = export_stl(self.scene, os.path.join(d, "t.stl"), size_mm=100)
+            count = struct.unpack("<I", stl.read_bytes()[80:84])[0]
+        full = sum(m.n_faces for m in self.scene.meshes if m.lod == 0 and m.role not in
+                   ("rail", "road_motorway", "road_primary", "road_secondary", "road_tertiary", "road_residential", "road_service"))
+        self.assertEqual(count, full)
+
+    def test_viewer_packs_one_chunk_per_tile_and_level(self):
+        with tempfile.TemporaryDirectory() as d:
+            html = export_html(self.scene, THEME, os.path.join(d, "t.html")).read_text(encoding="utf-8")
+        cfg = json.loads(re.search(r'<script type="application/json" id="cfg">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(len(cfg["groups"]), 4 * 3)
+        self.assertEqual((cfg["tiles"], cfg["maxLod"]), (2, 2))
+        self.assertAlmostEqual(cfg["tileSize"], 200.0)
+
+
+class ViewerFacts(unittest.TestCase):
+    def test_facts_are_plain_json_numbers(self):
+        from map3d.viewer import _facts
+        info = {"buildings": {"count": np.int64(12), "gabled": np.int64(3), "height_known": 5, "height_estimated": 7},
+                "trees": np.int64(40), "bridges": 2, "relief_m": np.float32(18.26), "dem_min_m": 301.0,
+                "road_paths": [[1, 2]], "traffic": {"x": 1}}
+        facts = _facts(info)
+        self.assertEqual(facts["buildings"], {"count": 12, "gabled": 3, "height_known": 5, "height_estimated": 7})
+        self.assertEqual((facts["trees"], facts["bridges"]), (40, 2))
+        self.assertEqual(facts["relief_m"], 18.3)
+        self.assertNotIn("road_paths", facts)
+        json.dumps(facts)                       # must serialise into the viewer's config block
+        self.assertEqual(_facts({}), {})
 
 
 if __name__ == "__main__":

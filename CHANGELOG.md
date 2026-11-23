@@ -8,11 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Community Contributions
 
 ### Added
+- **Real imagery in the 3D viewer** - two toggles: *Satellite ground (map overlay)* drapes Esri World Imagery under the
+  ground, forest and parks (as the vvd-kiosk does), and *Real building textures* puts the same photo on roofs and walls.
+  Tiles load in the browser when toggled on, so the file itself stays self-contained; the attribution is shown in the corner.
 - **3D city models** (`--3d`) - new `map3d/` package. Builds terrain, extruded buildings (pitched roofs for houses),
   bridges, water, parks, forests and trees from OpenStreetMap, Overture Maps (optional, `pyarrow`) and AWS Terrain Tiles.
   Outputs: rendered poster (same themes/typography), self-contained interactive three.js viewer (`.html`), colored `.glb`
   and print-scaled `.stl`. New options: `--3d-outputs`, `--azimuth`, `--elevation`, `--exaggeration`, `--zoom`,
   `--print-size`, `--no-trees`, `--no-terrain`, `--no-overture`. Offline tests in `test/test_map3d.py`.
+- **Multi-tile 3D models** (`--tiles N`, 1-7) with viewer performance features: three levels of detail per tile, billboard tree impostors, lazy per-tile loading, distance fog with a draw distance, fog of war, camera-following shadows and adaptive resolution.
 - **3D GUI** - `launch_gui.bat` / `python -m map3d.gui`: a local browser page (stdlib only, 127.0.0.1) to generate 3D models,
   watch progress, view them interactively and reopen previous ones.
 

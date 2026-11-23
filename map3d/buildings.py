@@ -139,7 +139,8 @@ def _triangulate(polys: np.ndarray):
 
 
 def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[np.ndarray, np.ndarray], np.ndarray],
-                    exag: float, tint: np.ndarray | None = None) -> BuildingGeometry:
+                    exag: float, tint: np.ndarray | None = None, gables: bool = True,
+                    min_area: float = MIN_FOOTPRINT_AREA) -> BuildingGeometry:
     """
     Extrude building footprints into a single triangle mesh.
 
@@ -155,7 +156,7 @@ def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[n
     parts, src = shapely.get_parts(geoms, return_index=True)
     row = row_of_part_src[src]
     area = shapely.area(parts)
-    keep = area >= MIN_FOOTPRINT_AREA
+    keep = area >= min_area
     parts, row = parts[keep], row[keep]
     if len(parts) == 0:
         return empty
@@ -176,7 +177,7 @@ def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[n
     z0 = np.minimum(z0, ground_z(shapely.get_x(cen), shapely.get_y(cen)))
 
     # ---- gabled roof candidates: simple, near-rectangular footprints ----------------
-    gable = ridge > 0
+    gable = (ridge > 0) & gables
     n_holes = shapely.get_num_interior_rings(parts)
     mrr = shapely.minimum_rotated_rectangle(parts)
     mrr_ok = shapely.get_type_id(mrr) == 3
@@ -291,8 +292,10 @@ def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[n
         tint_f = np.ones(len(faces), dtype=np.float32)
     else:
         tint_f = tint[row][face_pid].astype(np.float32)
+    # Ground height under every vertex (the building's lowest ground point): the viewer rescales heights above it
+    vbase = np.concatenate([np.repeat(z0[PID], 4), np.repeat(z0[tri_pid], 3) if len(tri_xy) else np.zeros(0)]).astype(np.float32)
     mesh = Mesh(name="buildings", role="building", vertices=verts, faces=faces, tint=tint_f, flat=True,
-                casts_shadow=True, receives_shadow=True)
+                casts_shadow=True, receives_shadow=True, base=vbase)
     above = wall_top_z + ridge_s - z0
     return BuildingGeometry(mesh=mesh, footprints=parts, heights_above_ground=above, n_gabled=n_gabled)
 

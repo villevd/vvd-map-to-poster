@@ -26,6 +26,8 @@ class Mesh:
     casts_shadow: bool = False                # interactive viewer: casts real-time shadows
     receives_shadow: bool = True              # interactive viewer: receives real-time shadows
     depth_bias: float = 0.0                   # painter's-algorithm bias in metres (towards the camera)
+    base: np.ndarray | None = None            # (N,) float32 ground height under each vertex, so the viewer can rescale heights above it
+    lod: int = 0                              # level of detail: 0 full, 1 medium, 2 far (static outputs use 0 only)
     tags: dict = field(default_factory=dict)
 
     @property
@@ -60,7 +62,8 @@ class Mesh:
             normals=None if self.normals is None else self.normals[used],
             tint=self.tint, shadowed=self.shadowed, flat=self.flat,
             casts_shadow=self.casts_shadow, receives_shadow=self.receives_shadow,
-            depth_bias=self.depth_bias, tags=dict(self.tags),
+            depth_bias=self.depth_bias, lod=self.lod, tags=dict(self.tags),
+            base=None if self.base is None else self.base[used],
         )
 
     def subset(self, face_mask: np.ndarray, **overrides) -> "Mesh":
@@ -71,7 +74,7 @@ class Mesh:
             tint=None if self.tint is None else self.tint[face_mask],
             shadowed=None if self.shadowed is None else self.shadowed[face_mask],
             flat=self.flat, casts_shadow=self.casts_shadow, receives_shadow=self.receives_shadow,
-            depth_bias=self.depth_bias, tags=dict(self.tags),
+            depth_bias=self.depth_bias, lod=self.lod, tags=dict(self.tags), base=self.base,
         )
         for key, value in overrides.items():
             setattr(m, key, value)

@@ -214,11 +214,29 @@ python create_map_poster.py -c "Paris" -C "France" -t noir --3d -d 2000 --3d-out
 | `--3d-outputs` | Any of `poster` (rendered image), `html` (interactive viewer), `glb` (colored model), `stl` (3D printing) | `poster,html` |
 | `--azimuth` | Camera compass bearing in degrees (180 = looking north from the south) | 225 |
 | `--elevation` | Camera angle above the horizon in degrees | 45 |
-| `--exaggeration` | Vertical exaggeration of relief, buildings and trees | 1.5 |
+| `--exaggeration` | Vertical exaggeration of the terrain | 1.5 |
+| `--building-exaggeration` | Vertical exaggeration of buildings and trees | same as `--exaggeration` |
 | `--zoom` | Crop in on the model in the rendered poster | 1 |
+| `--tiles` | Build a tiles x tiles grid of tiles for a larger detailed area (1-7) | 1 |
 | `--print-size` | Width of the STL model in millimetres | 200 |
 | `--no-trees`, `--no-terrain`, `--no-buildings`, `--no-railways` | Leave a layer out | |
 | `--no-overture` | OpenStreetMap only | |
+
+**Bigger areas (`--tiles`).** `--tiles 3 -d 700` builds a 3 x 3 grid of 1.4 km tiles (a 4.2 km area) that stays detailed;
+`-d` is then the half-width of *one* tile. Data and elevation are fetched once for the whole area, so tile seams line up.
+The interactive viewer stays fast on big models:
+
+| Technique | What it does |
+|-----------|--------------|
+| Level of detail | Every tile is built at three levels (full, medium without pitched roofs and small buildings, far with coarse terrain and main roads only); the viewer switches by distance |
+| Billboard impostors | At medium distance trees become GPU-instanced camera-facing cards (2 triangles instead of 6-12) |
+| Lazy loading | Each tile and level is decompressed and uploaded only when needed, nearest first; hidden tiles are never loaded |
+| Fog and draw distance | Distance fog plus a view-distance slider drop tiles that are too far to matter |
+| Fog of war | Optional: only tiles near where you have explored are shown, the rest stay as placeholders |
+| Adaptive quality | Shadows follow the camera; render resolution drops and recovers with the frame rate (Performance panel) |
+
+Expect larger files (about 5 MB per tile) and a slower poster image (about 45 s for 3 x 3). Up to 7 x 7 is accepted; Overpass
+may refuse very large OpenStreetMap queries, in which case Overture Maps still fills in.
 
 A 3D model covers much less ground than a flat poster: use `-d 1000`-`2500` (the model is a `2 x d` metre square).
 Outputs are saved next to the posters as `{city}_{theme}_3d_{timestamp}.{png,html,glb,stl}`.
@@ -243,6 +261,9 @@ Buildings without a mapped height get one estimated from their type and footprin
 the 3D look add optional keys to a theme JSON: `ground`, `forest`, `tree`, `building_3d`, `frame`, `skirt`, `bridge`.
 The interactive `.html` viewer needs internet access (it loads three.js from a CDN); it has orbit/zoom, real-time sun
 shadows, layer toggles, vertical exaggeration and sun controls, and a PNG snapshot button.
+**Realistic view** (checkbox in the viewer) sets the sun, sky and season from the model's location and the current
+date and time, shows current weather from Open-Meteo (only the model's coordinates are sent), lights windows and
+streets at night, and drives cars along the roads. A time-of-day slider previews other hours.
 
 ### Distance Guide
 

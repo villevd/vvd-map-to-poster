@@ -59,6 +59,9 @@ class CityData:
     trees: np.ndarray                           # (n, 2) positions of individually mapped trees
     sources: dict = field(default_factory=dict)  # human-readable provenance, for logs and the viewer
     stats: dict = field(default_factory=dict)    # building merge statistics
+    signals: np.ndarray = field(default_factory=lambda: np.zeros((0, 2)))     # traffic signals (x, y), OSM
+    stop_signs: np.ndarray = field(default_factory=lambda: np.zeros((0, 2)))  # stop signs (x, y), OSM
+    runways: list = field(default_factory=list)  # runway centre lines (LineStrings, local metres), OSM aeroway=runway
 
 
 BUILDING_COLUMNS = ["height", "levels", "min_height", "roof_shape", "roof_height", "kind", "part", "source", "h_src"]
@@ -71,6 +74,8 @@ OSM_LANDCOVER_TAGS = {
 }
 OSM_BUILDING_TAGS = {"building": True, "building:part": True}
 OSM_RAIL_TAGS = {"railway": "rail"}
+OSM_TRAFFIC_TAGS = {"highway": ["traffic_signals", "stop"]}
+OSM_AIRPORT_TAGS = {"aeroway": ["runway"]}
 
 # --------------------------------------------------------------------------
 # Small parsing helpers
@@ -450,7 +455,9 @@ def _road_frame(rows: list) -> gpd.GeoDataFrame:
     if not rows:
         return gpd.GeoDataFrame({"cls": [], "bridge": []}, geometry=gpd.GeoSeries([], dtype="geometry"))
     return gpd.GeoDataFrame(
-        {"cls": [r[0] for r in rows], "bridge": [r[1] for r in rows]}, geometry=[r[2] for r in rows],
+        {"cls": [r[0] for r in rows], "bridge": [r[1] for r in rows],
+         "ref": [r[3] if len(r) > 3 else "" for r in rows], "roundabout": [bool(r[4]) if len(r) > 4 else False for r in rows]},
+        geometry=[r[2] for r in rows],
     )
 
 
@@ -463,10 +470,12 @@ def roads_from_osm_graph(graph, frame: LocalFrame) -> gpd.GeoDataFrame:
     cls = hw.map(ROAD_CLASS)
     bridge = _is_yes(_col(edges, "bridge"))
     tunnel = _is_yes(_col(edges, "tunnel"))
-    for g, c, b, t in zip(edges.geometry.values, cls.to_numpy(), bridge, tunnel):
+    refs = _col(edges, "ref").map(lambda v: ";".join(map(str, v)) if isinstance(v, (list, tuple)) else ("" if v is None or v != v else str(v)))
+    ring = _col(edges, "junction").map(_first).astype(str).str.lower().isin(["roundabout", "circular"]).to_numpy()
+    for g, c, b, t, ref, rb in zip(edges.geometry.values, cls.to_numpy(), bridge, tunnel, refs.to_numpy(), ring):
         if c is None or (isinstance(c, float) and np.isnan(c)) or t:
             continue
-        rows.append((c, bool(b), g))
+        rows.append((c, bool(b), g, ref, bool(rb)))
     out = _road_frame(rows)
     return out.set_crs(frame.crs)
 
@@ -510,7 +519,15 @@ def roads_from_overture(segments: gpd.GeoDataFrame, frame: LocalFrame) -> tuple[
     sub = _col(seg, "subtype").astype(str).str.lower().to_numpy()
     klass = _col(seg, "class").astype(str).str.lower().to_numpy()
     flags = _col(seg, "road_flags").to_numpy()
-    for geom, s, k, fl in zip(seg.geometry.values, sub, klass, flags):
+
+    def route_refs(routes) -> str:       # Overture lists the numbered routes a segment belongs to, e.g. Quebec R 117
+        try:
+            return ";".join(str(r.get("ref")) for r in routes if r.get("ref"))
+        except (TypeError, AttributeError):
+            return ""
+
+    refs = _col(seg, "routes").map(route_refs).to_numpy()
+    for geom, s, k, fl, ref in zip(seg.geometry.values, sub, klass, flags, refs):
         if geom is None or geom.is_empty:
             continue
         if s == "rail":
@@ -525,13 +542,13 @@ def roads_from_overture(segments: gpd.GeoDataFrame, frame: LocalFrame) -> tuple[
         bridges = _flag_intervals(fl, "is_bridge")
         tunnels = _flag_intervals(fl, "is_tunnel")
         if not bridges and not tunnels:
-            rows.append((c, False, geom))
+            rows.append((c, False, geom, ref, False))
             continue
         cuts = sorted(bridges + tunnels)
         for a, b in _complement(cuts):
-            rows.append((c, False, substring(geom, a, b, normalized=True)))
+            rows.append((c, False, substring(geom, a, b, normalized=True), ref, False))
         for a, b in bridges:
-            rows.append((c, True, substring(geom, a, b, normalized=True)))
+            rows.append((c, True, substring(geom, a, b, normalized=True), ref, False))
     rows = [r for r in rows if isinstance(r[2], LineString) and r[2].length > 1.0]
     return _road_frame(rows).set_crs(frame.crs), np.asarray(rails, dtype=object)
 
@@ -553,20 +570,31 @@ def _try(fn, what: str, log):
 
 
 def collect(frame: LocalFrame, providers: Providers, log=print, want_trees: bool = True,
-            want_rails: bool = True) -> CityData:
+            want_rails: bool = True, want_traffic: bool = True, want_airport: bool = True) -> CityData:
     """Fetch everything from every enabled provider and merge it."""
     tile = frame.tile_polygon()
     sources: dict[str, list[str]] = {"buildings": [], "landcover": [], "roads": [], "terrain": []}
 
     # ---- OpenStreetMap --------------------------------------------------
-    osm_b, osm_lc, osm_rail, graph = None, None, None, None
+    osm_b, osm_lc, osm_rail, osm_traffic, osm_air, graph = None, None, None, None, None, None
+    log("Step 1/3 - Downloading map data. Each layer is cached on disk, so a repeat run of the same area is fast.")
     if providers.osm_features is not None:
+        log("  * OpenStreetMap: building outlines, heights and roof shapes...")
         osm_b = _try(lambda: providers.osm_features("buildings3d", OSM_BUILDING_TAGS), "OSM buildings", log)
+        log("  * OpenStreetMap: water, parks, forests and other land cover...")
         osm_lc = _try(lambda: providers.osm_features("landcover3d", OSM_LANDCOVER_TAGS), "OSM land cover", log)
         if want_rails:
+            log("  * OpenStreetMap: railway lines...")
             osm_rail = _try(lambda: providers.osm_features("railways", OSM_RAIL_TAGS), "OSM railways", log)
+        if want_traffic:
+            log("  * OpenStreetMap: traffic lights and stop signs (the cars obey these)...")
+            osm_traffic = _try(lambda: providers.osm_features("traffic", OSM_TRAFFIC_TAGS), "OSM traffic signals", log)
+        if want_airport:
+            osm_air = _try(lambda: providers.osm_features("airport", OSM_AIRPORT_TAGS), "OSM runways", log)
     if providers.osm_graph is not None:
+        log("  * OpenStreetMap: the street network (lanes, one-ways, speeds)...")
         graph = _try(providers.osm_graph, "OSM street network", log)
+    log("  * Converting everything to metres on a flat local grid centred on the city...")
 
     buildings_osm = _try(lambda: normalize_osm_buildings(osm_b, frame), "OSM buildings", log)
     buildings_osm = buildings_osm if buildings_osm is not None else _empty_buildings()
@@ -589,11 +617,29 @@ def collect(frame: LocalFrame, providers: Providers, log=print, want_trees: bool
         rails = np.asarray(r.geometry.values[r.geometry.geom_type.isin(["LineString", "MultiLineString"]).to_numpy()],
                            dtype=object)
 
+    runways = []
+    if osm_air is not None and not osm_air.empty:
+        ra = frame.project(osm_air)
+        for g in ra.geometry.values:
+            if g is not None and g.geom_type in ("LineString", "MultiLineString"):
+                runways.append(g)
+    signals, stop_signs = np.zeros((0, 2)), np.zeros((0, 2))
+    if osm_traffic is not None and not osm_traffic.empty:
+        t = frame.project(osm_traffic)
+        pts = t.geometry.centroid                      # nodes are points; a mapped area counts as its centre
+        kind = _col(t, "highway").map(_first).astype(str).str.lower().to_numpy()
+        xy = np.column_stack([pts.x.to_numpy(), pts.y.to_numpy()])
+        signals = xy[kind == "traffic_signals"]
+        stop_signs = xy[kind == "stop"]
+
+    log(f"  OK OpenStreetMap gave {len(buildings_osm):,} buildings, {len(roads):,} road segments, "
+        f"{len(signals):,} traffic lights, {len(stop_signs):,} stop signs.")
     # ---- Overture Maps --------------------------------------------------
     buildings = buildings_osm
     merge_stats: dict = {}
     if providers.overture:
         bbox = frame.bbox_lonlat(margin=20.0)
+        log("Step 2/3 - Overture Maps: filling gaps (extra buildings and heights, water, land cover)...")
         fl = lambda otype, cols: overture.fetch_layer(otype, bbox, cols, providers.cache_dir, log)  # noqa: E731
         ov_b = fl("building", _OV_BUILDING_COLS)
         if ov_b is not None:
@@ -617,7 +663,7 @@ def collect(frame: LocalFrame, providers: Providers, log=print, want_trees: bool
             sources["landcover"].append("Overture Maps")
 
         if not len(roads):
-            seg = fl("segment", ["id", "geometry", "subtype", "class", "road_flags"])
+            seg = fl("segment", ["id", "geometry", "subtype", "class", "road_flags", "routes"])
             if seg is not None and not seg.empty:
                 roads, ov_rails = roads_from_overture(seg, frame)
                 if len(roads):
@@ -644,5 +690,48 @@ def collect(frame: LocalFrame, providers: Providers, log=print, want_trees: bool
         water=lc["water"], forest=lc["forest"], parks=lc["parks"],
         roads=roads, rails=rails, trees=lc["trees"] if want_trees else np.zeros((0, 2)),
         sources={k: v for k, v in sources.items() if v},
-        stats=merge_stats,
+        stats=merge_stats, signals=signals, stop_signs=stop_signs, runways=runways,
     )
+
+
+def tile_data(data: CityData, cx: float, cy: float, half: float) -> CityData:
+    """
+    The part of ``data`` that belongs to the square tile centred on (cx, cy), moved so the tile is
+    centred on the origin. Buildings and trees go to the tile holding their centre (never cut in two);
+    areas and lines are only pre-filtered, the scene builder clips them to the tile.
+    """
+    off = np.array([cx, cy])
+    tile = shapely.box(cx - half, cy - half, cx + half, cy + half)
+    near = shapely.buffer(tile, 40.0)
+
+    def shift(geoms):
+        return shapely.transform(geoms, lambda c: c - off) if len(geoms) else geoms
+
+    def pick(geoms):
+        geoms = np.asarray(geoms, dtype=object)
+        return shift(geoms[shapely.intersects(geoms, near)]) if len(geoms) else geoms
+
+    b = data.buildings
+    if len(b):
+        cen = shapely.centroid(np.asarray(b.geometry.values, dtype=object))
+        gx, gy = shapely.get_x(cen), shapely.get_y(cen)
+        inside = (gx >= cx - half) & (gx < cx + half) & (gy >= cy - half) & (gy < cy + half)
+        b = b[inside].copy()
+        b["geometry"] = shift(np.asarray(b.geometry.values, dtype=object))
+    roads = data.roads
+    if roads is not None and len(roads):
+        roads = roads[shapely.intersects(np.asarray(roads.geometry.values, dtype=object), near)].copy()
+        roads["geometry"] = shift(np.asarray(roads.geometry.values, dtype=object))
+    trees = data.trees
+    if len(trees):
+        t_in = (np.abs(trees[:, 0] - cx) < half) & (np.abs(trees[:, 1] - cy) < half)
+        trees = trees[t_in] - off
+    def points(xy):
+        if not len(xy):
+            return xy
+        xy = xy[(np.abs(xy[:, 0] - cx) < half + 40.0) & (np.abs(xy[:, 1] - cy) < half + 40.0)]
+        return xy - off
+
+    return CityData(buildings=b, water=pick(data.water), forest=pick(data.forest), parks=pick(data.parks),
+                    roads=roads, rails=pick(data.rails), trees=trees, sources=data.sources, stats=data.stats,
+                    signals=points(data.signals), stop_signs=points(data.stop_signs))
