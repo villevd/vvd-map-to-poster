@@ -113,8 +113,8 @@ def export_glb(scene: Scene, theme: dict, path: str | Path, credits: str = "") -
     return path
 
 
-STL_SKIP_ROLES = {"rail"} | {f"road_{c}" for c in ("motorway", "primary", "secondary", "tertiary", "residential",
-                                                   "service")}
+STL_SKIP_ROLES = {"rail", "marking_yellow", "marking_white"} | {f"road_{c}" for c in (
+    "motorway", "primary", "secondary", "tertiary", "residential", "service")}
 
 
 def export_stl(scene: Scene, path: str | Path, size_mm: float = 200.0) -> Path:

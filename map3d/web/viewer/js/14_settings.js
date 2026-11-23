@@ -1,0 +1,91 @@
+// ---------------------------------------------------------------- remember the viewer's settings (this browser)
+// Layers, imagery, exaggeration, sun, fog and quality come back as they were left. The theme is not stored here:
+// the GUI chooses it per model.
+const VIEW_KEY = 'map3d-view';
+const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality'];
+const VIEW_GROUPS = ['building', 'tree', 'roads', 'markings', 'traffic'];
+const groupBox = g => document.querySelector(`input[data-group="${g}"]`) || (PARENT_DOC && PARENT_DOC.querySelector(`input[data-group="${g}"]`));
+let viewRestoring = false;
+function viewSave() {
+  const s = {};
+  for (const id of VIEW_IDS) { const el = $(id); if (el) s[id] = el.type === 'checkbox' ? el.checked : el.value; }
+  for (const g of VIEW_GROUPS) { const el = groupBox(g); if (el) s['group:' + g] = el.checked; }
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(s)); } catch (e) {}
+}
+function viewRestore() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(VIEW_KEY) || '{}') || {}; } catch (e) { s = {}; }
+  const touched = [];
+  viewRestoring = true;
+  for (const id of VIEW_IDS) {
+    const el = $(id); if (!el || !(id in s)) continue;
+    if (el.type === 'checkbox') el.checked = !!s[id];
+    else if (el.tagName === 'SELECT') { if (![...el.options].some(o => o.value === String(s[id]))) continue; el.value = String(s[id]); }
+    else el.value = String(s[id]);
+    if (id !== 'rotSpeed') touched.push(el);   // the speed slider must not switch auto-rotate on
+    else controls.autoRotateSpeed = +el.value;
+  }
+  for (const g of VIEW_GROUPS) {
+    const el = groupBox(g); if (!el || !('group:' + g in s)) continue;
+    el.checked = !!s['group:' + g]; touched.push(el);
+  }
+  // Fire the controls' own handlers (sliders, layers, imagery, fog) so the scene follows the restored values
+  for (const el of touched) {
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  viewRestoring = false;
+}
+for (const doc of [document, PARENT_DOC]) {
+  if (!doc) continue;
+  for (const type of ['change', 'input']) doc.addEventListener(type, () => { if (!viewRestoring) viewSave(); }, true);
+}
+viewRestore();
+
+// The camera: where you left it, per model (so a reload does not turn you back to the start view)
+const CAM_KEY = 'map3d-cam:' + [CFG.geo.lat, CFG.geo.lon, CFG.geo.half, CFG.tiles].join(',');
+function camSave() {
+  try { localStorage.setItem(CAM_KEY, JSON.stringify({ p: camera.position.toArray(), t: controls.target.toArray() })); } catch (e) {}
+}
+function camRestore() {
+  try {
+    const s = JSON.parse(localStorage.getItem(CAM_KEY) || 'null');
+    if (s && s.p && s.t) { camera.position.fromArray(s.p); controls.target.fromArray(s.t); controls.update(); }
+  } catch (e) {}
+}
+camRestore();
+controls.addEventListener('end', camSave);
+
+// Depth precision: the near and far planes follow the camera instead of spanning the whole model all the time.
+// A 30 m / 90 km range leaves centimetres of depth error far away, which is what makes roofs shimmer (z-fighting).
+let clipDist = 0;
+function fitClip() {
+  const dist = camera.position.distanceTo(controls.target);
+  if (clipDist && Math.abs(dist - clipDist) < 0.03 * clipDist) return;
+  clipDist = dist;
+  camera.near = Math.max(0.5, dist * 0.02);
+  camera.far = dist + H * 6;
+  camera.updateProjectionMatrix();
+}
+renderer.setAnimationLoop(now => {
+  const dt = Math.min((now - lastFrameT) / 1000, 0.1);
+  const dtReal = Math.min((now - lastFrameT) / 1000, 1);   // the plane keeps real time even when frames are slow
+  lastFrameT = now;
+  trafficRoot.visible = layers.traffic;
+  if (trafficUpdate && layers.traffic) trafficUpdate(dt * (+$('tspeed').value), REAL.on);
+  if (planeUpdate) planeUpdate(dtReal);
+  keyMove(dt);
+  controls.update();
+  fitClip();
+  PRECIP.update(now);
+  if (tick++ % 6 === 0) updateTiles();
+  adapt(now);
+  stepRealistic(now);
+  placeSearch.update(now);
+  renderer.render(scene, camera);
+  if (!window.__ready && tileList.some(t => t.shown >= 0)) {
+    $('loading').classList.add('done'); window.__ready = true;
+  } else if (!window.__ready) {
+    setLoading(loadedGroups, CFG.groups.length);
+  }
+});

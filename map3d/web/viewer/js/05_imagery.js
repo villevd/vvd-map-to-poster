@@ -1,0 +1,287 @@
+// ---------------------------------------------------------------- real imagery (Esri World Imagery, as in vvd-kiosk)
+// Ground, forest and parks take the satellite picture as a map overlay; buildings take it too, so roofs show
+// real roofs and walls show the real surroundings. Tiles are fetched in the browser, one square per model tile,
+// and cached. The model's own planar UVs (top-down) place the picture on the geometry.
+const IMG_KIND = { ground: 'sat', forest: 'sat', park: 'sat', building: 'bld' };
+const imgOn = { sat: false, bld: false };
+const SAT_CREDIT = 'Imagerie Esri, Maxar, Earthstar Geographics';
+const GEO0 = CFG.geo || { lat: 0, lon: 0, half: H };
+function metresToLonLat(x, y) {   // model-local metres (east, north) -> lon/lat; linear is exact to well under a metre over a tile
+  const f = GEO0.lat * Math.PI / 180;
+  const mLat = 111132.92 - 559.82 * Math.cos(2 * f) + 1.175 * Math.cos(4 * f);
+  const mLon = 111412.84 * Math.cos(f) - 93.5 * Math.cos(3 * f);
+  return [GEO0.lon + x / mLon, GEO0.lat + y / mLat];
+}
+const tileSlots = { free: 8, queue: [] };
+function withTileSlot(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      tileSlots.free--;
+      fn().then(resolve, reject).finally(() => { tileSlots.free++; const next = tileSlots.queue.shift(); if (next) next(); });
+    };
+    if (tileSlots.free > 0) run(); else tileSlots.queue.push(run);
+  });
+}
+const satBitmaps = new Map();   // "z/x/y" -> Promise<ImageBitmap | null>, least recently used first
+function satBitmap(z, x, y) {
+  const k = z + '/' + x + '/' + y;
+  if (satBitmaps.has(k)) { const p = satBitmaps.get(k); satBitmaps.delete(k); satBitmaps.set(k, p); return p; }   // touched: keep it
+  // Close-up pictures need many more picture tiles than the base ones, so the cache is larger
+  if (satBitmaps.size > 1000) satBitmaps.delete(satBitmaps.keys().next().value);
+  satBitmaps.set(k, withTileSlot(async () => {
+    // Stored picture tiles come from IndexedDB; only missing ones go to the network, and then they are stored
+    const saved = await idbGet('tiles', k);
+    if (saved && saved.blob) { try { return await createImageBitmap(saved.blob); } catch (e) { /* unreadable: fetch again */ } }
+    const r = await fetch(`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`);
+    if (!r.ok) return null;
+    const blob = await r.blob();
+    if (blob.size < 32) return null;
+    idbPut('tiles', k, { blob, t: Date.now() });
+    return createImageBitmap(blob);
+  }).catch(() => null));
+  return satBitmaps.get(k);
+}
+/** One canvas texture covering the tile square: north is up, so v = 1 at the north edge. Null when offline.
+ *  ``boost`` asks for finer picture tiles and a larger canvas (the close-up upgrade); ``cap`` bounds the fetch count. */
+async function buildSatCanvas(tile, boost = 0, cap = 144) {
+  const th = T / 2, cx = tile.center.x, my = -tile.center.z;
+  const [w, s] = metresToLonLat(cx - th, my - th), [e, n] = metresToLonLat(cx + th, my + th);
+  const S = (N > 1 ? 1024 : 2048) * (boost ? 2 : 1);
+  const merc = (lon, lat, z) => [(lon + 180) / 360 * 2 ** z,
+    (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** z];
+  const tile2lon = (x, z) => x / 2 ** z * 360 - 180;
+  const tile2lat = (y, z) => Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 2 ** z))) * 180 / Math.PI;
+  // Zoom that gives about one picture pixel per canvas pixel, lowered until the tile needs a sane number of fetches
+  let z = Math.min(boost ? 19 : 18, Math.max(10,Math.round(Math.log2(156543.03 * Math.cos(GEO0.lat * Math.PI / 180) / (T / S)))));
+  let x0, x1, y0, y1;
+  for (;;) {
+    const a = merc(w, n, z), b = merc(e, s, z);
+    x0 = Math.floor(a[0]); x1 = Math.floor(b[0]); y0 = Math.floor(a[1]); y1 = Math.floor(b[1]);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) <= cap || z <= 10) break;
+    z -= 1;
+  }
+  const cells = [];
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) cells.push([tx, ty]);
+  const bitmaps = await Promise.all(cells.map(([tx, ty]) => satBitmap(z, tx, ty)));
+  if (!bitmaps.some(Boolean)) return null;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1a1c16'; g.fillRect(0, 0, S, S);
+  const px = lon => (lon - w) / (e - w) * S, py = lat => (n - lat) / (n - s) * S;
+  cells.forEach(([tx, ty], i) => {
+    const bmp = bitmaps[i]; if (!bmp) return;
+    const l = px(tile2lon(tx, z)), r = px(tile2lon(tx + 1, z)), t = py(tile2lat(ty, z)), b = py(tile2lat(ty + 1, z));
+    g.drawImage(bmp, l, t, r - l, b - t);
+  });
+  return c;
+}
+/** A picture (canvas or ImageBitmap) as a texture for the ground and roofs. */
+function satTextureFrom(src) {
+  const tex = new THREE.Texture(src);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return tex;
+}
+async function buildSatTexture(tile) {
+  const c = await buildSatCanvas(tile);
+  return c ? satTextureFrom(c) : null;
+}
+
+// Close-up pictures are kept in IndexedDB, so a model's sharp ground comes back on the next visit without a download.
+// Close-up keys are per model (its place and size) and per tile.
+// Two stores: 'closeup' (the sharp composite per tile) and 'tiles' (every raw ArcGIS picture tile, so any rebuild
+// of a picture reads from here instead of the network). Each keeps its own most-recent-N limit.
+const SAT_DB = 'city3d-satellite', SAT_LIMIT = { closeup: 60, tiles: 4000 };
+let satDbP = null;
+function satDb() {
+  if (!satDbP) satDbP = new Promise((res, rej) => {
+    if (!('indexedDB' in window)) return rej(new Error('no IndexedDB'));
+    const req = indexedDB.open(SAT_DB, 2);
+    req.onupgradeneeded = () => {
+      for (const name of Object.keys(SAT_LIMIT)) {
+        if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name).createIndex('t', 't');
+      }
+    };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  }).catch(() => null);      // no storage (private window, blocked): the picture is simply fetched again
+  return satDbP;
+}
+async function idbGet(store, key) {
+  try {
+    const db = await satDb(); if (!db) return null;
+    return await new Promise(res => {
+      const r = db.transaction(store).objectStore(store).get(key);
+      r.onsuccess = () => res(r.result || null); r.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+}
+async function idbPut(store, key, value) {
+  try {
+    const db = await satDb(); if (!db) return;
+    await new Promise(res => {
+      const tx = db.transaction(store, 'readwrite'), st = tx.objectStore(store);
+      st.put(value, key);
+      const cnt = st.count();
+      cnt.onsuccess = () => {                       // over the limit: drop the oldest entries
+        let excess = cnt.result - SAT_LIMIT[store];
+        if (excess > 0) st.index('t').openCursor().onsuccess = e => {
+          const c = e.target.result;
+          if (c && excess-- > 0) { c.delete(); c.continue(); }
+        };
+      };
+      tx.oncomplete = tx.onerror = tx.onabort = () => res();
+    });
+  } catch (e) { /* storage full or blocked: keep going without it */ }
+}
+function satHiKeyOf(tile) {
+  return [GEO0.lat, GEO0.lon, T, N, H, tile.key].join('|');
+}
+/** The close-up picture for a tile: from IndexedDB when stored, otherwise fetched, then stored for next time. */
+async function loadSatHi(tile) {
+  const key = satHiKeyOf(tile);
+  const saved = await idbGet('closeup', key);
+  if (saved && saved.blob) {
+    try { return satTextureFrom(await createImageBitmap(saved.blob)); } catch (e) { /* unreadable: fetch again */ }
+  }
+  const c = await buildSatCanvas(tile, 1, 256);
+  if (!c) return null;
+  try {
+    c.toBlob(blob => { if (blob) idbPut('closeup', key, { blob, t: Date.now() }); }, 'image/jpeg', 0.9);
+  } catch (e) { /* a canvas that cannot be exported is still shown, just not stored */ }
+  return satTextureFrom(c);
+}
+function satTexture(tile) {
+  if (tile.satHi) return Promise.resolve(tile.satHi);   // the close-up picture replaces the base one once it is ready
+  if (!tile.sat) tile.sat = buildSatTexture(tile).catch(() => null);
+  return tile.sat;
+}
+/** Close to a tile the ground picture is re-cut at about twice the resolution, once; the base picture stays until then. */
+const satHiKept = new Map();   // tile key -> close-up picture of a tile that unloaded, so it comes back sharp without a re-download
+function keepSatHi(tile) {
+  if (!tile.satHi) return;
+  satHiKept.delete(tile.key); satHiKept.set(tile.key, tile.satHi); tile.satHi = null;
+  while (satHiKept.size > 12) { const [k, old] = satHiKept.entries().next().value; satHiKept.delete(k); old.dispose(); }
+}
+function upgradeSat(tile) {
+  if (tile.satHiReq) return;
+  tile.satHiReq = true;
+  if (satHiKept.has(tile.key)) {
+    tile.satHi = satHiKept.get(tile.key); satHiKept.delete(tile.key);
+    if (imgOn.sat || imgOn.bld) syncImagery(tile);
+    return;
+  }
+  buildSatTexture(tile, 1, 256).then(tex => {
+    if (!tex) return;
+    tile.satHi = tex;
+    if (imgOn.sat || imgOn.bld) syncImagery(tile);
+  }).catch(() => {});
+}
+/** Planar UVs from the top-down position: the tile square maps onto [0, 1] (u east, v north). */
+function tileUV(pos, tile) {
+  const th = T / 2, x0 = tile.center.x - th, zN = tile.center.z - th, n = pos.length / 3;
+  const uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    uv[i * 2] = (pos[i * 3] - x0) / T;                 // viewer x = east
+    uv[i * 2 + 1] = (zN + T - pos[i * 3 + 2]) / T;     // viewer z = -north: the north edge (zN) gives v = 1
+  }
+  return uv;
+}
+/** Put the picture on (or take it off) every loaded mesh of ``tile`` that the imagery toggles cover. */
+async function syncImagery(tile) {
+  const meshes = [];
+  for (const lv of Object.values(tile.levels)) if (lv.obj) lv.obj.traverse(o => { if (o.userData.img && o.material) meshes.push(o); });
+  if (!meshes.length) return;
+  const tex = meshes.some(m => imgOn[m.userData.img]) ? await satTexture(tile) : null;
+  for (const m of meshes) {
+    const on = !!tex && imgOn[m.userData.img];
+    m.userData.textured = on;
+    if (m.material.map !== (on ? tex : null)) { m.material.map = on ? tex : null; m.material.needsUpdate = true; }
+    applyThemeTo(m);
+  }
+  updateCredits();
+}
+function updateCredits() {
+  const parts = [CFG.credits, imgOn.sat || imgOn.bld ? SAT_CREDIT : ''].filter(Boolean);
+  $('credits').textContent = parts.join(' · ');
+}
+async function loadGroup(tile, lod) {
+  const lv = tile.levels[lod]; if (!lv || lv.state !== 'idle') return;
+  lv.state = 'loading';
+  const actId = actStart(lv.cfg.id ? 'Model tile' : 'Edge chunk tile', `detail ${lod} · ${(lv.cfg.meshes || []).length} meshes`);
+  const el = lv.cfg.id ? $(lv.cfg.id) : null;  // model tiles keep their data in a <script>; chunks carry it inline
+  const buf = await inflate(lv.cfg.b64 || el.textContent.trim());
+  lv.cfg.b64 = null; if (el) el.textContent = '';   // free the base64 text once decoded
+  const group = new THREE.Group(); group.visible = false;
+  for (const m of lv.cfg.meshes) {
+    const g = new THREE.BufferGeometry();
+    const posArr = new Float32Array(buf, m.pos, m.nv * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    if (IMG_KIND[m.role]) g.setAttribute('uv', new THREE.BufferAttribute(tileUV(posArr, tile), 2));
+    g.setIndex(new THREE.BufferAttribute(m.idx16 ? new Uint16Array(buf, m.idx, m.nf * 3) : new Uint32Array(buf, m.idx, m.nf * 3), 1));
+    if (m.tint !== undefined) {
+      const bytes = new Uint8Array(buf, m.tint, m.nv), t = new Float32Array(m.nv * 3);
+      for (let i = 0; i < m.nv; i++) { const v = bytes[i] / 127.5; t[i * 3] = t[i * 3 + 1] = t[i * 3 + 2] = v; }
+      g.setAttribute('color', new THREE.BufferAttribute(t, 3));
+    }
+    if (m.nrm !== undefined) g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(buf, m.nrm, m.nv * 3), 3, true));
+    else if (!m.flat) g.computeVertexNormals();
+    g.computeBoundingSphere();
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: m.tint !== undefined, flatShading: m.flat,
+      side: m.role === 'bridge_side' ? THREE.DoubleSide : THREE.FrontSide });
+    if (m.overlay) { mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2; }
+    if (m.role === 'building') addWindows(mat);
+    if (m.base !== undefined) g.setAttribute('aBase', new THREE.BufferAttribute(new Float32Array(buf, m.base, m.nv), 1));
+    if (m.base !== undefined) heightScale(mat);
+    const mesh = new THREE.Mesh(g, mat);
+    if (m.variant !== undefined && m.tint !== undefined) {
+      const ca = g.getAttribute('color').array, grey = new Float32Array(m.nv);
+      for (let i = 0; i < m.nv; i++) grey[i] = ca[i * 3];
+      mesh.userData.treeVar = { n: m.nv, grey, variant: new Uint8Array(buf, m.variant, m.nv) };
+    }
+    if (m.base !== undefined && m.cast) {
+      mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }); heightScale(mesh.customDepthMaterial);
+    }
+    Object.assign(mesh.userData, { role: m.role, group: m.group, cast: m.cast, receive: m.receive, img: IMG_KIND[m.role] });
+    group.add(mesh); lv.tris += m.nf;
+  }
+  if (lv.cfg.imp) {
+    group.add(makeImpostors(new Float32Array(buf, lv.cfg.imp.off, lv.cfg.imp.n * 6), lv.cfg.imp.n));
+    lv.tris += lv.cfg.imp.n * 2;
+  }
+  applyThemeTo(group); paintTreeVariants(group); setThemeColors();
+  root.add(group); lv.obj = group; lv.state = 'ready'; loadedGroups++;
+  actEnd(actId);
+  setLayers(group);
+  if (imgOn.sat || imgOn.bld) syncImagery(tile);
+}
+for (const [id, kind] of [['satOn', 'sat'], ['texOn', 'bld']]) {
+  $(id).onchange = () => { imgOn[kind] = $(id).checked; tileList.forEach(t => syncImagery(t)); updateCredits(); };
+}
+document.querySelectorAll('input[data-group]').forEach(cb => {
+  cb.onchange = () => { layers[cb.dataset.group] = cb.checked; tileList.forEach(t => Object.values(t.levels).forEach(l => l.obj && setLayers(l.obj))); };
+});
+// Terrain exaggeration scales the whole model vertically; building height then rescales heights above the ground
+// (per-vertex 'aBase') so the two are independent. Both start at the values the model was built with.
+const EXC = CFG.exag || { terrain: 1, building: 1 };   // models made before this setting existed
+const EX = { t: Math.max(EXC.terrain, 0.01), b: Math.max(EXC.building, 0.01) };
+const heightU = { uBF: { value: 1 } };
+function heightScale(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.uniforms.uBF = heightU.uBF;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aBase; uniform float uBF;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.y = aBase + (transformed.y - aBase) * uBF;');
+  };
+  mat.customProgramCacheKey = () => 'hs' + (prev ? 'w' : '');
+}
+function applyExaggeration() {
+  const T = +$('exag').value, B = +$('bexag').value;
+  $('vExagO').textContent = T.toFixed(1) + '×'; $('vBexagO').textContent = B.toFixed(1) + '×';
+  root.scale.y = T / EX.t;
+  heightU.uBF.value = (B / EX.b) / (T / EX.t);
+}
+$('exag').oninput = $('bexag').oninput = applyExaggeration;
+

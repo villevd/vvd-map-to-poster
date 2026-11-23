@@ -1,0 +1,137 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D City Maps</title>
+<style>
+__GUI_CSS__</style>
+</head>
+<body>
+<aside id="side">
+  <header class="top">
+    <div class="logo" aria-hidden="true">◈</div>
+    <div class="brand-txt">
+      <h1>3D City Maps</h1>
+      <div class="dim ellip" id="modelNow">No model open</div>
+    </div>
+    <button type="button" class="icon-btn" id="collapse" aria-expanded="true" aria-controls="sideBody" title="Collapse panel">‹</button>
+  </header>
+
+  <div id="miniProg" role="status" aria-live="polite" hidden>
+    <div class="bar"><div id="miniFill"></div></div>
+    <div class="progRow"><span id="miniStage">Starting…</span><span id="miniPct">0%</span></div>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Panel sections">
+    <button type="button" role="tab" id="t-create" data-tab="create" aria-controls="tab-create" aria-selected="true">Create</button>
+    <button type="button" role="tab" id="t-style" data-tab="style" aria-controls="tab-style" aria-selected="false" tabindex="-1">Style</button>
+    <button type="button" role="tab" id="t-insights" data-tab="insights" aria-controls="tab-insights" aria-selected="false" tabindex="-1">Insights</button>
+    <button type="button" role="tab" id="t-library" data-tab="library" aria-controls="tab-library" aria-selected="false" tabindex="-1">Library<span class="count" id="libCount"></span></button>
+  </nav>
+
+  <div id="sideBody">
+    <!-- ================= CREATE ================= -->
+    <section class="tabpanel" id="tab-create" role="tabpanel" aria-labelledby="t-create">
+      <form id="f" autocomplete="off">
+        <details class="card" open>
+          <summary><span>Place &amp; area</span><span class="pill q" title="Changes here are queued and applied when you rebuild the model">rebuild</span><span class="chev">›</span></summary>
+          <div class="cbody">
+            <div class="foot">
+              <div class="grid" id="grid" aria-hidden="true"></div>
+              <div class="footTxt"><div class="big" id="footBig">—</div><div id="footSub"></div></div>
+            </div>
+            <label>City<input type="text" name="city" value="Val-d'Or" required></label>
+            <label>Country<input type="text" name="country" value="Canada" required></label>
+            <label>Area radius <output id="distO"></output><input type="range" name="distance" min="500" max="4000" step="100" value="1500"></label>
+            <label>Tiles (grid) <output id="tilesO"></output><input type="range" name="tiles" min="1" max="7" step="1" value="1"></label>
+            <div id="hint"></div>
+          </div>
+        </details>
+
+        <details class="card" open>
+          <summary><span>Data sources</span><span class="pill q">rebuild</span><span class="chev">›</span></summary>
+          <div class="cbody">
+            <div class="checks">
+              <label><input type="checkbox" name="terrain" checked> Real terrain</label>
+              <label><input type="checkbox" name="overture" checked> Overture Maps</label>
+            </div>
+          </div>
+        </details>
+
+        <details class="card">
+          <summary><span>Also save</span><span class="chev">›</span></summary>
+          <div class="cbody">
+            <div class="checks">
+              <label><input type="checkbox" name="o_poster"> Poster image</label>
+              <label><input type="checkbox" name="o_glb"> GLB model</label>
+              <label><input type="checkbox" name="o_stl"> STL (3D print)</label>
+            </div>
+          </div>
+        </details>
+
+        <details class="card">
+          <summary><span>Exact centre</span><span class="chev">›</span></summary>
+          <div class="cbody">
+            <label>Latitude<input type="text" name="latitude" placeholder="48.1023"></label>
+            <label>Longitude<input type="text" name="longitude" placeholder="-77.7876"></label>
+          </div>
+        </details>
+
+        <div id="pend"></div>
+        <button type="submit" id="go" class="btn-primary">Generate 3D model</button>
+        <button type="button" id="stop" class="btn-ghost" hidden>Cancel build</button>
+      </form>
+
+      <div id="prog" hidden>
+        <div class="bar"><div id="fill"></div></div>
+        <div class="progRow"><span id="progStage">Starting…</span><span id="progPct">0%</span></div>
+      </div>
+      <div id="status" role="status"></div>
+      <details class="card" id="logCard" hidden style="margin-top:12px">
+        <summary><span>Build log</span><span class="chev">›</span></summary>
+        <div class="cbody"><pre id="log"></pre></div>
+      </details>
+    </section>
+
+    <!-- ================= STYLE ================= -->
+    <section class="tabpanel" id="tab-style" role="tabpanel" aria-labelledby="t-style" hidden>
+      <details class="card" open>
+        <summary><span>Theme</span><span class="pill l" title="Applied to the open model immediately">instant</span><span class="chev">›</span></summary>
+        <div class="cbody">
+          <div class="swatches" id="swatches"></div>
+          <div id="themeDesc"></div>
+          <select name="theme" id="theme" form="f" hidden></select>
+        </div>
+      </details>
+      <details class="card" open>
+        <summary><span>Live controls</span><span class="pill l" title="Applied to the model immediately, no rebuild">instant</span><span class="chev">›</span></summary>
+        <div class="cbody">
+          <div id="previewMount"><p class="none">Open a model from Library, or build one, and its live controls appear here.</p></div>
+        </div>
+      </details>
+    </section>
+
+    <!-- ================= INSIGHTS ================= -->
+    <section class="tabpanel" id="tab-insights" role="tabpanel" aria-labelledby="t-insights" hidden>
+      <div id="insights"></div>
+    </section>
+
+    <!-- ================= LIBRARY ================= -->
+    <section class="tabpanel" id="tab-library" role="tabpanel" aria-labelledby="t-library" hidden>
+      <input type="search" id="libSearch" placeholder="Search city, theme or date…" aria-label="Search models">
+      <ul id="models"></ul>
+    </section>
+  </div>
+  <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Resize panel (drag, or use arrow keys)" tabindex="0" title="Drag to resize · double-click to reset"></div>
+</aside>
+<main>
+  <div id="empty"><div><h3>No model yet</h3>Choose a city and press <b>Generate</b>. The first build downloads map data and
+    takes a minute; rebuilding the same area is fast. Drag to orbit, scroll to zoom.</div></div>
+  <iframe id="view" title="3D model" hidden></iframe>
+</main>
+<script>
+__GUI_JS__</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+  :root { --bg: __BG__; --text: __TEXT__; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #ui { position: fixed; top: 16px; left: 16px; width: 270px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 16px;
+    border-radius: 14px; background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(10px);
+    border: 1px solid color-mix(in srgb, var(--text) 22%, transparent); }
+  #ui h1 { margin: 0 0 2px; font-size: 20px; letter-spacing: .12em; text-transform: uppercase; }
+  #ui .sub { margin: 0 0 12px; opacity: .75; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  #ui label { display: flex; align-items: center; gap: 8px; margin: 5px 0; cursor: pointer; }
+  #ui .row { display: block; margin: 10px 0 2px; font-size: 12px; opacity: .85; }
+  #ui select { width: 100%; padding: 6px 8px; border-radius: 8px; color: var(--text); font: inherit;
+    background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); }
+  #ui input[type=range] { width: 100%; accent-color: var(--text); }
+  #ui input[type=checkbox] { accent-color: var(--text); }
+  #ui .btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  #ui button { flex: 1; padding: 7px 10px; border-radius: 8px; cursor: pointer; color: var(--text);
+    background: transparent; border: 1px solid color-mix(in srgb, var(--text) 45%, transparent); font: inherit; }
+  #ui button:hover { background: color-mix(in srgb, var(--text) 14%, transparent); }
+  #ui details { margin-top: 10px; } #ui summary { cursor: pointer; font-size: 12px; opacity: .85; }
+  #stats { margin-top: 8px; font: 11px/1.4 ui-monospace, Consolas, monospace; opacity: .7; white-space: pre; }
+  #findBox { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); width: min(460px, 90vw); z-index: 4;
+    border-radius: 12px; padding: 8px; background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(10px);
+    border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); }
+  #find { width: 100%; padding: 8px 10px; border-radius: 8px; font: inherit; color: var(--text); background: transparent;
+    border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); outline: none; }
+  #findList { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+  #findList li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  #findList li.sel, #findList li:hover { background: color-mix(in srgb, var(--text) 16%, transparent); }
+  #findList li.msg { opacity: .7; cursor: default; }
+  #credits { position: fixed; right: 12px; bottom: 8px; font-size: 11px; opacity: .6; max-width: 60vw; text-align: right; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg);
+    letter-spacing: .2em; text-transform: uppercase; font-size: 13px; transition: opacity .4s; z-index: 5; }
+  #lbox { max-width: min(520px, 90vw); text-transform: none; letter-spacing: 0; font-size: 14px; }
+  #ltitle { text-transform: uppercase; letter-spacing: .2em; font-size: 13px; margin-bottom: 10px; }
+  #lsteps { margin: 0; padding: 0; list-style: none; }
+  #lsteps li { padding: 2px 0 2px 22px; position: relative; opacity: .45; }
+  #lsteps li.now { opacity: 1; } #lsteps li.done { opacity: .85; }
+  #lsteps li::before { content: '\25CB'; position: absolute; left: 0; }
+  #lsteps li.now::before { content: '\25D0'; } #lsteps li.done::before { content: '\2713'; }
+  #lnote { margin-top: 10px; font-size: 12px; opacity: .65; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #hint { position: fixed; left: 16px; bottom: 8px; font-size: 11px; opacity: .55; }
+  #activity { position: fixed; right: 12px; bottom: 30px; width: 300px; z-index: 3; padding: 9px 11px; border-radius: 10px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid color-mix(in srgb, var(--text) 22%, transparent); font: 11px/1.35 system-ui, sans-serif; opacity: .8; }
+  #activity.busy { opacity: 1; }
+  #activity .act-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; font-weight: 600; }
+  #activity .act-head span:last-child { font-weight: 400; opacity: .7; white-space: nowrap; }
+  #activity .act-bar { height: 5px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
+  #activity #actFill { height: 100%; width: 0; background: var(--text); transition: width .25s ease; }
+  #activity ul { list-style: none; margin: 7px 0 0; padding: 0; max-height: 170px; overflow: hidden; }
+  #activity li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; padding: 1px 0; white-space: nowrap; }
+  #activity li .det { overflow: hidden; text-overflow: ellipsis; opacity: .65; }
+  #activity li .ms { opacity: .6; font-variant-numeric: tabular-nums; }
+  #activity li.now { font-weight: 600; }
+  #activity li.bad { color: #c0392b; }
+  @media (max-width: 640px) {
+    #ui { width: auto; right: 12px; left: 12px; top: auto; bottom: 12px; padding: 10px 12px; max-height: 45vh; }
+    #ui .sub, #hint, #credits, #activity { display: none; }
+  }
+  #colorsBox { margin: 8px 0 2px; font-size: 12px; }
+  #colorsBox summary { cursor: pointer; opacity: .85; margin-bottom: 4px; }
+  .cpick { display: flex; justify-content: space-between; align-items: center; margin: 3px 0; }
+  .cpick input[type=color] { width: 44px; height: 22px; border: none; background: none; padding: 0; cursor: pointer; }

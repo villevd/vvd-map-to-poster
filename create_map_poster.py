@@ -822,14 +822,34 @@ DEFAULT_DISTANCE_3D = 1500          # a 3D model is about buildings, so it cover
 THREE_D_OUTPUTS = ("poster", "html", "glb", "stl")
 
 
+# Public Overpass servers to try, in order, when the main one does not answer
+OVERPASS_MIRRORS = (
+    "https://overpass-api.de/api",
+    "https://overpass.kumi.systems/api",
+    "https://overpass.private.coffee/api",
+)
+
+
 def _overpass_reachable(timeout=8):
-    """Quick health probe of the Overpass endpoint OSMnx will use."""
-    url = ox.settings.overpass_url.rstrip("/") + "/status"
-    try:
-        r = requests.get(url, timeout=timeout, headers={"User-Agent": "city_map_poster"})
-        return r.status_code == 200
-    except requests.RequestException:
-        return False
+    """
+    Probe the Overpass servers in turn. The first one that answers becomes the endpoint OSMnx uses.
+    Returns False only when none of them answers.
+    """
+    main = ox.settings.overpass_url.rstrip("/")
+    candidates = [main] + [m for m in OVERPASS_MIRRORS if m.rstrip("/") != main]
+    for base in candidates:
+        try:
+            r = requests.get(base + "/status", timeout=timeout, headers={"User-Agent": "city_map_poster"})
+            ok = r.status_code == 200
+        except requests.RequestException:
+            ok = False
+        if ok:
+            if base != main:
+                print(f"  ↪ Overpass: using the mirror {base}")
+            ox.settings.overpass_url = base
+            return True
+        print(f"  ↪ Overpass: {base} did not answer")
+    return False
 
 
 def _fetch_with_retries(fetch_once, what, state):

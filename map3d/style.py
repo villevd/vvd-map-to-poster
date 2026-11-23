@@ -77,6 +77,7 @@ def role_colors(theme: dict) -> dict[str, RGB]:
         "rail": get("railway", road_default),
         "bridge": bridge, "bridge_side": mix(bridge, BLACK, 0.45),
         "frame": frame, "skirt": skirt,
+        "marking_yellow": (0.94, 0.76, 0.14), "marking_white": (0.95, 0.95, 0.93),
     }
 
 

@@ -456,7 +456,8 @@ def _road_frame(rows: list) -> gpd.GeoDataFrame:
         return gpd.GeoDataFrame({"cls": [], "bridge": []}, geometry=gpd.GeoSeries([], dtype="geometry"))
     return gpd.GeoDataFrame(
         {"cls": [r[0] for r in rows], "bridge": [r[1] for r in rows],
-         "ref": [r[3] if len(r) > 3 else "" for r in rows], "roundabout": [bool(r[4]) if len(r) > 4 else False for r in rows]},
+         "ref": [r[3] if len(r) > 3 else "" for r in rows], "roundabout": [bool(r[4]) if len(r) > 4 else False for r in rows],
+         "oneway": [bool(r[5]) if len(r) > 5 else False for r in rows]},   # for the road markings (two-way lines only)
         geometry=[r[2] for r in rows],
     )
 
@@ -472,10 +473,11 @@ def roads_from_osm_graph(graph, frame: LocalFrame) -> gpd.GeoDataFrame:
     tunnel = _is_yes(_col(edges, "tunnel"))
     refs = _col(edges, "ref").map(lambda v: ";".join(map(str, v)) if isinstance(v, (list, tuple)) else ("" if v is None or v != v else str(v)))
     ring = _col(edges, "junction").map(_first).astype(str).str.lower().isin(["roundabout", "circular"]).to_numpy()
-    for g, c, b, t, ref, rb in zip(edges.geometry.values, cls.to_numpy(), bridge, tunnel, refs.to_numpy(), ring):
+    oneway = _col(edges, "oneway").map(lambda v: str(_first(v)).lower() in ("yes", "true", "1", "-1")).to_numpy()
+    for g, c, b, t, ref, rb, ow in zip(edges.geometry.values, cls.to_numpy(), bridge, tunnel, refs.to_numpy(), ring, oneway):
         if c is None or (isinstance(c, float) and np.isnan(c)) or t:
             continue
-        rows.append((c, bool(b), g, ref, bool(rb)))
+        rows.append((c, bool(b), g, ref, bool(rb), bool(ow)))
     out = _road_frame(rows)
     return out.set_crs(frame.crs)
 
@@ -632,8 +634,12 @@ def collect(frame: LocalFrame, providers: Providers, log=print, want_trees: bool
         signals = xy[kind == "traffic_signals"]
         stop_signs = xy[kind == "stop"]
 
-    log(f"  OK OpenStreetMap gave {len(buildings_osm):,} buildings, {len(roads):,} road segments, "
-        f"{len(signals):,} traffic lights, {len(stop_signs):,} stop signs.")
+    got = len(buildings_osm) + len(roads) + len(signals) + len(stop_signs)
+    if got:
+        log(f"  OK OpenStreetMap gave {len(buildings_osm):,} buildings, {len(roads):,} road segments, "
+            f"{len(signals):,} traffic lights, {len(stop_signs):,} stop signs.")
+    else:
+        log("  ⚠ OpenStreetMap returned nothing for this area (the server may have failed silently).")
     # ---- Overture Maps --------------------------------------------------
     buildings = buildings_osm
     merge_stats: dict = {}

@@ -46,9 +46,15 @@ def download_google_font(font_family: str, weights: list = None) -> Optional[dic
         }
 
         # Fetch CSS file
-        response = requests.get(api_url, params=params, headers=headers, timeout=10)
-        response.raise_for_status()
-        css_content = response.text
+        # The CSS only names the font files, so it is cached like them: no request once it is known
+        css_path = FONTS_CACHE_DIR / f"{font_name_safe}_{'-'.join(map(str, weights))}.css"
+        if css_path.exists():
+            css_content = css_path.read_text(encoding="utf-8")
+        else:
+            response = requests.get(api_url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            css_content = response.text
+            css_path.write_text(css_content, encoding="utf-8")
 
         # Parse CSS to extract weight-specific URLs
         # Google Fonts CSS has @font-face blocks with font-weight and src: url()

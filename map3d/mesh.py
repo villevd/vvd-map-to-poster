@@ -21,6 +21,7 @@ class Mesh:
     faces: np.ndarray                         # (M, 3) int32, counter-clockwise seen from outside
     normals: np.ndarray | None = None         # (N, 3) smooth vertex normals (terrain-like meshes)
     tint: np.ndarray | None = None            # (M,) per-face brightness multiplier
+    variant: np.ndarray | None = None         # (M,) uint8 per-face colour variant (trees: the viewer picks a shade per tree)
     shadowed: np.ndarray | None = None        # (M,) bool, face lies in a cast shadow (PNG renderer only)
     flat: bool = True                         # flat (faceted) shading vs smooth
     casts_shadow: bool = False                # interactive viewer: casts real-time shadows
@@ -60,7 +61,7 @@ class Mesh:
             vertices=self.vertices[used],
             faces=inverse.reshape(-1, 3).astype(np.int32),
             normals=None if self.normals is None else self.normals[used],
-            tint=self.tint, shadowed=self.shadowed, flat=self.flat,
+            tint=self.tint, variant=self.variant, shadowed=self.shadowed, flat=self.flat,
             casts_shadow=self.casts_shadow, receives_shadow=self.receives_shadow,
             depth_bias=self.depth_bias, lod=self.lod, tags=dict(self.tags),
             base=None if self.base is None else self.base[used],
@@ -72,6 +73,7 @@ class Mesh:
             name=self.name, role=self.role, vertices=self.vertices, faces=self.faces[face_mask],
             normals=self.normals,
             tint=None if self.tint is None else self.tint[face_mask],
+            variant=None if self.variant is None else self.variant[face_mask],
             shadowed=None if self.shadowed is None else self.shadowed[face_mask],
             flat=self.flat, casts_shadow=self.casts_shadow, receives_shadow=self.receives_shadow,
             depth_bias=self.depth_bias, lod=self.lod, tags=dict(self.tags), base=self.base,

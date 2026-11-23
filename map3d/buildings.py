@@ -138,6 +138,45 @@ def _triangulate(polys: np.ndarray):
     return coords, idx
 
 
+def cut_coplanar_overlaps(parts: np.ndarray, top: np.ndarray, min_area: float,
+                          tol: float = 0.35) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Where two footprints overlap and their roofs are at (nearly) the same height, the roofs lie in one plane and the
+    graphics card cannot decide which to draw (z-fighting, a shimmering roof). The overlapped area is cut out of the
+    larger footprint, so the smaller, more specific one (a building part, say) keeps its roof and every spot of roof is
+    drawn once. Returns ``(new parts, index of the source part of each)``; footprints that vanish are dropped.
+    """
+    ident = np.arange(len(parts))
+    if len(parts) < 2:
+        return parts, ident
+    tree = shapely.STRtree(parts)
+    i, j = tree.query(parts, predicate="intersects")
+    m = i < j
+    i, j = i[m], j[m]
+    if not len(i):
+        return parts, ident
+    overlap = shapely.area(shapely.intersection(parts[i], parts[j]))
+    sel = (overlap > 0.25) & (np.abs(top[i] - top[j]) < tol)
+    i, j = i[sel], j[sel]
+    if not len(i):
+        return parts, ident
+    ai, aj = shapely.area(parts[i]), shapely.area(parts[j])
+    loser = np.where(ai > aj, i, j)                   # the larger footprint gives way (ties: the later one)
+    winner = np.where(loser == i, j, i)
+    out = parts.copy()
+    for lo in np.unique(loser):
+        out[lo] = shapely.difference(parts[lo], shapely.union_all(parts[winner[loser == lo]]))
+    flat, src = [], []
+    for k, g in enumerate(out):
+        if g is None or g.is_empty:
+            continue
+        for part in shapely.get_parts(g):
+            if part.geom_type == "Polygon" and part.area >= min_area:
+                flat.append(part)
+                src.append(k)
+    return np.asarray(flat, dtype=object), np.asarray(src, dtype=int)
+
+
 def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[np.ndarray, np.ndarray], np.ndarray],
                     exag: float, tint: np.ndarray | None = None, gables: bool = True,
                     min_area: float = MIN_FOOTPRINT_AREA) -> BuildingGeometry:
@@ -160,6 +199,12 @@ def build_buildings(b: gpd.GeoDataFrame, heights: Heights, ground_z: Callable[[n
     parts, row = parts[keep], row[keep]
     if len(parts) == 0:
         return empty
+    parts = shapely.orient_polygons(parts, exterior_cw=False)
+    # roofs that would share a plane are separated before anything is extruded
+    parts, from_part = cut_coplanar_overlaps(parts, (heights.eave + heights.ridge)[row], min_area)
+    if len(parts) == 0:
+        return empty
+    row = row[from_part]
     parts = shapely.orient_polygons(parts, exterior_cw=False)
 
     eave = heights.eave[row]

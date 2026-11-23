@@ -23,6 +23,8 @@
   var SPAWN_CLEAR = 35.0;   // m, cars are never spawned this close to a junction
   var YIELD_LOOK = 30.0;    // m, an entering car gives way to a car on the ring this close to its entry
 
+  // Lorries only drive roads faster than this (m/s, about 47 km/h): tertiary and up, never residential or service
+  var LORRY_MIN_V = 12;
   // Vehicle types. len is a multiple of the base car length, w of its width.
   var TYPES = [
     { name: 'small',  len: 0.82, w: 0.9,  accel: 2.6, vmax: 1.0 },
@@ -182,6 +184,7 @@
         var s = SPAWN_CLEAR + rand() * (e.L - 2 * SPAWN_CLEAR);
         var mix = e.h ? MIX_HEAVY : (e.v >= 13 ? MIX_MAJOR : MIX_LOCAL), r = rand(), type = 0, acc = mix[0];
         while (r > acc && type < mix.length - 1) acc += mix[++type];
+        if (type === 3 && e.v < LORRY_MIN_V) type = 1;     // no lorries on small roads: a car instead
         var spec = TYPES[type];
         var dir0 = e.d !== undefined ? e.d : (rand() < 0.5 ? 0 : 1);
         var car = { e: id, dir: dir0, s: s, v: 0, k: (0.85 + 0.2 * rand()) * spec.vmax, leader: null,
@@ -204,6 +207,7 @@
       var all = out[end];
       var straight = all.filter(function (o) { return !(o[0] === car.e && o[1] !== car.dir); });
       var pool = straight.length ? straight : all;
+      if (car.type === 3) pool = pool.filter(function (o) { return edges[o[0]].v >= LORRY_MIN_V; });   // lorries never turn onto small roads
       if (!pool.length) {                 // dead end of one-way roads: turn round rather than vanish
         var back = [car.e, car.dir ? 0 : 1];
         return back;
@@ -279,7 +283,8 @@
           target = Math.min(target, Math.sqrt(2 * BRAKE * Math.max(rem - STOP_GAP - 0.3, 0)));
         }
         if (car.leader) {
-          var gap = (car.leader.s - car.s) - (car.leader.len + clearance);
+          // keep a one-second headway on top of the bumper gap, so fast traffic does not tailgate
+          var gap = (car.leader.s - car.s) - (car.leader.len + clearance + car.v);
           target = Math.min(target, Math.sqrt(2 * BRAKE * Math.max(gap, 0)));
         }
         if (car.v > target) car.v = Math.max(target, car.v - BRAKE_MAX * dt);

@@ -26,7 +26,7 @@ import shapely
 STAC_CATALOG_URL = "https://stac.overturemaps.org/catalog.json"
 STAC_INDEX_URL = "https://stac.overturemaps.org/{release}/collections.parquet"
 S3_REGION = "us-west-2"
-CACHE_TTL_DAYS = 30
+CACHE_TTL_DAYS = 90           # downloaded layers are reused for three months (set lower for fresher data)
 USER_AGENT = "city_map_poster-3d (overture maps reader)"
 
 _index_cache: dict = {}
@@ -41,18 +41,46 @@ def is_available() -> bool:
         return False
 
 
-def _latest_release(session: requests.Session) -> str:
+RELEASE_TTL_DAYS = 1          # the newest release is looked up once a day at most
+INDEX_TTL_DAYS = 365          # a release's index never changes once published
+
+
+def _fresh(path: Path, ttl_days: float) -> bool:
+    return path.exists() and time.time() - path.stat().st_mtime < ttl_days * 86400
+
+
+def _latest_release(session: requests.Session, cache_dir: Path) -> str:
+    cached = cache_dir / "overture_release.txt"
+    if _fresh(cached, RELEASE_TTL_DAYS):
+        return cached.read_text(encoding="utf-8").strip()
     r = session.get(STAC_CATALOG_URL, timeout=30)
     r.raise_for_status()
-    return r.json()["latest"]
+    release = r.json()["latest"]
+    cached.write_text(release, encoding="utf-8")
+    return release
 
 
-def _stac_index(release: str, session: requests.Session):
+def _stac_index(release: str, session: requests.Session, cache_dir: Path):
+    """The release's STAC index (a few MB). Kept in memory for this run and on disk for later ones."""
     if release not in _index_cache:
         import pyarrow.parquet as pq
+        cached = cache_dir / f"overture_index_{release}.parquet"
+        if _fresh(cached, INDEX_TTL_DAYS):
+            try:
+                _index_cache[release] = pq.read_table(cached)
+                return _index_cache[release]
+            except Exception:
+                cached.unlink(missing_ok=True)
         r = session.get(STAC_INDEX_URL.format(release=release), timeout=120)
         r.raise_for_status()
-        _index_cache[release] = pq.read_table(io.BytesIO(r.content))
+        table = pq.read_table(io.BytesIO(r.content))
+        tmp = cached.with_suffix(".part")
+        try:
+            tmp.write_bytes(r.content)
+            tmp.replace(cached)
+        except OSError:
+            pass
+        _index_cache[release] = table
     return _index_cache[release]
 
 
@@ -90,8 +118,8 @@ def fetch_layer(otype: str, bbox: tuple[float, float, float, float], columns: li
 
         session = requests.Session()
         session.headers["User-Agent"] = USER_AGENT
-        release = _latest_release(session)
-        index = _stac_index(release, session)
+        release = _latest_release(session, cache_dir)
+        index = _stac_index(release, session, cache_dir)
         west, south, east, north = bbox
 
         items = index.filter((pc.field("collection") == otype) & (pc.field("type") == "Feature"))

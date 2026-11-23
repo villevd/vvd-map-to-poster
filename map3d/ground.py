@@ -337,12 +337,14 @@ def plan_trees(forest: BaseGeometry | None, parks: BaseGeometry | None, mapped: 
 # Crown archetypes: (share, height scale, width scale, sides, rings).
 # Each ring is (height fraction, radius fraction), bottom to top. Blunt, stepped and
 # rounded profiles give varied silhouettes instead of one needle-sharp cone.
+TREE_VARIANTS = 5    # colour variants a tree can pick from in the viewer
+
 _TREE_KINDS = (
-    (0.40, 1.00, 1.05, 7, ((0.10, 1.00), (0.40, 0.84), (0.62, 0.64), (0.82, 0.44), (0.97, 0.24))),  # spruce: tiers, blunt top
-    (0.15, 1.10, 0.80, 6, ((0.12, 1.00), (0.50, 0.74), (0.78, 0.48), (0.95, 0.26))),                # fir: narrow and taller
-    (0.30, 0.85, 1.15, 8, ((0.28, 0.82), (0.50, 1.00), (0.72, 1.00), (0.90, 0.66), (1.00, 0.30))),  # oak: round crown
-    (0.10, 1.10, 0.65, 6, ((0.15, 0.80), (0.45, 0.95), (0.75, 0.85), (0.93, 0.55), (1.00, 0.30))),  # poplar: rounded column
-    (0.05, 0.45, 1.50, 7, ((0.20, 1.00), (0.60, 1.05), (0.85, 0.75), (1.00, 0.35))),                # shrub: low and wide
+    (0.40, 1.00, 1.05, 10, ((0.10, 1.00), (0.40, 0.84), (0.62, 0.64), (0.82, 0.44), (0.97, 0.24))),  # spruce: tiers, blunt top
+    (0.15, 1.10, 0.80, 8, ((0.12, 1.00), (0.50, 0.74), (0.78, 0.48), (0.95, 0.26))),                # fir: narrow and taller
+    (0.30, 0.85, 1.15, 12, ((0.28, 0.82), (0.50, 1.00), (0.72, 1.00), (0.90, 0.66), (1.00, 0.30))),  # oak: round crown
+    (0.10, 1.10, 0.65, 8, ((0.15, 0.80), (0.45, 0.95), (0.75, 0.85), (0.93, 0.55), (1.00, 0.30))),  # poplar: rounded column
+    (0.05, 0.45, 1.50, 9, ((0.20, 1.00), (0.60, 1.05), (0.85, 0.75), (1.00, 0.35))),                # shrub: low and wide
 )
 
 
@@ -387,17 +389,19 @@ def tree_geometry(pos: np.ndarray, zfunc: ZFunc, exag: float, rng: np.random.Gen
     """
     Low-poly trees of several kinds (see ``_TREE_KINDS``), each crown a little different.
 
-    Returns ``(vertices, faces, face_tint, crown_heights, positions)``; the last
-    two follow the order trees were emitted in (grouped by kind).
+    Returns ``(vertices, faces, face_tint, crown_heights, positions, face_variant)``. The last
+    two follow the order trees were emitted in (grouped by kind). ``face_variant`` is a per-face
+    index in ``0..TREE_VARIANTS-1``: the viewer picks a tree colour from it, so each tree can differ.
     """
     n = len(pos)
     if n == 0:
-        return (np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int32), np.zeros(0), np.zeros(0), np.zeros((0, 2)))
+        return (np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int32), np.zeros(0), np.zeros(0), np.zeros((0, 2)),
+                np.zeros(0, dtype=np.uint8))
     ground = zfunc(pos[:, 0], pos[:, 1]).astype(np.float64)
-    h_real = rng.uniform(6.0, 13.0, n)
+    h_real = rng.uniform(5.0, 11.0, n)
     kind = rng.choice(len(_TREE_KINDS), size=n, p=[k[0] for k in _TREE_KINDS])
 
-    verts, faces, tint, tops, placed = [], [], [], [], []
+    verts, faces, tint, tops, placed, variant = [], [], [], [], [], []
     off = 0
     for idx, (_, hs, ws, sides, profile) in enumerate(_TREE_KINDS):
         sel = kind == idx
@@ -405,7 +409,7 @@ def tree_geometry(pos: np.ndarray, zfunc: ZFunc, exag: float, rng: np.random.Gen
         if not m:
             continue
         h = h_real[sel] * hs * exag
-        r = 0.26 * h_real[sel] * ws
+        r = 0.20 * h_real[sel] * ws          # crown radius: slim, like real spruce, fir and poplar
         prof = np.asarray(profile, dtype=np.float64)
         # Extra ring sunk below the surface so the crown stays attached on slopes and under the tree's base.
         prof = np.vstack([[-0.08, prof[0, 1]], prof])
@@ -413,11 +417,12 @@ def tree_geometry(pos: np.ndarray, zfunc: ZFunc, exag: float, rng: np.random.Gen
         verts.append(v)
         faces.append(f + off)
         tint.append(np.repeat(rng.uniform(0.85, 1.12, m), tris))
+        variant.append(np.repeat(rng.integers(0, TREE_VARIANTS, m), tris).astype(np.uint8))
         tops.append(h)
         placed.append(pos[sel])
         off += len(v)
     return (np.concatenate(verts), np.concatenate(faces).astype(np.int32), np.concatenate(tint),
-            np.concatenate(tops), np.concatenate(placed))
+            np.concatenate(tops), np.concatenate(placed), np.concatenate(variant))
 
 
 # --------------------------------------------------------------------------

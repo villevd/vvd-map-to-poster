@@ -249,6 +249,12 @@ opens right there. Previous models are listed so you can reopen them instantly, 
 STL saved alongside. It runs only on your own machine (127.0.0.1, standard library only) and calls the same
 `--3d` command line underneath.
 
+**Traffic.** Cars, small cars, pickup trucks and lorries drive the real street network and obey mapped traffic lights and stop signs. Lorries and pickups are far more common on numbered trunk routes (Route 117 in Val-d'Or; change `HEAVY_ROUTES` in `map3d/traffic.py`), and lorries keep to main roads. Roundabouts are detected from OpenStreetMap's `junction=roundabout` or from circular loops of road; cars circulate one-way counter-clockwise (clockwise with `right_hand=False`), slowly, and entering cars give way.
+
+**Rain and snow.** The viewer's Weather section has Rain and Snow switches, each with an intensity slider, plus a wind slider. Both are GPU particle systems: every particle's position is computed in the shader from a time uniform, so the CPU does nothing per frame, intensity is the number of particles drawn, and the quality setting and the adaptive frame-rate controller thin them out automatically. Snow also settles on roofs, ground and trees in proportion to its intensity. The realistic view drives the same system from the real weather.
+
+You can also set the weather yourself: the Conditions selector (clear, partly cloudy, overcast, fog, light or heavy rain, snow, blizzard, thunderstorm) plus temperature, cloud cover, rain, snow and wind sliders replace the live weather. In the realistic view they drive the sky, cloud, fog, snow cover and particles (set the weather yourself, or pick *Live* to go back to the real one).
+
 **Data sources** (all free, no API key; each one that fails is skipped and the others carry on):
 
 | Source | Used for |

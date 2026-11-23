@@ -106,6 +106,9 @@ def decode_terrarium(png_bytes: bytes) -> np.ndarray:
 
 def _download_tile(z: int, x: int, y: int, cache_dir: Path, session: requests.Session) -> np.ndarray | None:
     path = cache_dir / f"{z}_{x}_{y}.png"
+    absent = path.with_suffix(".missing")          # outside the dataset: asked for once, never again
+    if absent.exists():
+        return None
     if path.exists():
         try:
             return decode_terrarium(path.read_bytes())
@@ -122,6 +125,7 @@ def _download_tile(z: int, x: int, y: int, cache_dir: Path, session: requests.Se
                 os.replace(tmp, path)
                 return data
             if r.status_code in (403, 404):      # outside the dataset
+                absent.touch()
                 return None
         except requests.RequestException:
             pass
@@ -134,7 +138,7 @@ def grid_step_for(side: float) -> float:
     return float(min(25.0, max(3.0, side / 500.0)))
 
 
-def fetch_dem(frame: LocalFrame, cache_dir: str | os.PathLike = "cache", log=print) -> Dem:
+def fetch_dem(frame: LocalFrame, cache_dir: str | os.PathLike = "cache", log=print, step: float | None = None) -> Dem:
     """
     Download (or load from cache) Terrarium tiles covering the tile and
     resample them onto a regular local grid. Raises RuntimeError when no tile
@@ -143,7 +147,7 @@ def fetch_dem(frame: LocalFrame, cache_dir: str | os.PathLike = "cache", log=pri
     cache = Path(cache_dir) / "terrain"
     cache.mkdir(parents=True, exist_ok=True)
 
-    step = grid_step_for(frame.side)
+    step = grid_step_for(frame.side) if step is None else float(step)
     margin = 4 * step
     zoom = choose_zoom(frame.lat, target_res=max(4.0, step * 0.8))
 

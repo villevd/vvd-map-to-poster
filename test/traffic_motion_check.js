@@ -26,6 +26,8 @@ Object.values(groups).forEach(members => {
 
 const names = TrafficSim.TYPES.map(t => t.name);
 const share = { heavy: names.map(() => 0), other: names.map(() => 0) };
+const initial = { heavy: names.map(() => 0), other: names.map(() => 0) };
+sim.cars.forEach(c => { (cfg.edges[c.e].h ? initial.heavy : initial.other)[c.type]++; });
 const out = { teleports: 0, ringCcw: 0, ringCw: 0, entries: 0, entriesTooClose: 0, ringEdges: ringIdx.length, cars: sim.cars.length };
 const last = sim.cars.map(c => { const p = sim.pose(c); return [p.x, p.z]; });
 const prevEdge = sim.cars.map(c => c.e);
@@ -57,4 +59,7 @@ for (let t = 0; t < seconds; t += dt) {
 const pct = a => { const s = a.reduce((x, y) => x + y, 0) || 1; return Object.fromEntries(a.map((v, i) => [names[i], v / s])); };
 out.mixHeavy = pct(share.heavy);
 out.mixOther = pct(share.other);
+out.startHeavy = pct(initial.heavy);
+out.startOther = pct(initial.other);
+out.startHeavyCount = initial.heavy.reduce((x, y) => x + y, 0);
 console.log(JSON.stringify(out));

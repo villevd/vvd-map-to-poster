@@ -13,6 +13,7 @@ from shapely.geometry.base import BaseGeometry
 
 from . import buildings as bld
 from . import ground as gnd
+from . import markings as mk
 from .data import CityData, tile_data
 from .geo import LocalFrame, polygonal
 from .mesh import Mesh, Scene
@@ -214,15 +215,15 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
         pos = gnd.plan_trees(forest, parks, data.trees, max_trees, avoid, rng, half)
         if len(pos) and detail == 1:
             # Medium distance: camera-facing impostor cards drawn by the viewer instead of 3-D trees
-            h_real = rng.uniform(6.0, 13.0, len(pos))
-            card = np.column_stack([pos[:, 0], pos[:, 1], ground_z(pos[:, 0], pos[:, 1]), 0.6 * h_real,
+            h_real = rng.uniform(5.0, 11.0, len(pos))
+            card = np.column_stack([pos[:, 0], pos[:, 1], ground_z(pos[:, 0], pos[:, 1]), 0.4 * h_real,
                                     h_real * bexag, rng.uniform(0.85, 1.12, len(pos))]).astype(np.float32)
             meshes.append(Mesh(name="tree-impostors", role="tree", vertices=np.zeros((0, 3), np.float32),
                                faces=np.zeros((0, 3), np.int32), tags={"impostors": card}))
         elif len(pos) and detail == 0:
-            v, f, tint_t, tree_tops, tree_pos = gnd.tree_geometry(pos, ground_z, bexag, rng)
+            v, f, tint_t, tree_tops, tree_pos, tree_var = gnd.tree_geometry(pos, ground_z, bexag, rng)
             tree_mesh = Mesh(name="trees", role="tree", vertices=v.astype(np.float32), faces=f,
-                             tint=tint_t.astype(np.float32), flat=True, casts_shadow=True,
+                             tint=tint_t.astype(np.float32), variant=tree_var, flat=False, casts_shadow=True,   # smooth crowns, not faceted
                              base=ground_z(v[:, 0], v[:, 1]).astype(np.float32))
             meshes.append(tree_mesh)
         log(f"✓ Trees: {len(pos)}")
@@ -255,6 +256,19 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
             if len(f):
                 meshes.append(Mesh(name=f"road:{cls}", role=f"road_{cls}", vertices=v.astype(np.float32), faces=f,
                                    shadowed=np.full(len(f), flag), flat=True, depth_bias=bias))
+    # ---- road markings: centre and edge lines painted on the surface (full detail only) -------------------
+    if opts.roads and detail == 0 and data.roads is not None and len(data.roads):
+        rd = data.roads[~data.roads["bridge"].to_numpy(dtype=bool)]
+        if "roundabout" in rd:
+            rd = rd[~rd["roundabout"].to_numpy(dtype=bool)]
+        one_way = rd["oneway"].to_numpy(dtype=bool) if "oneway" in rd else np.zeros(len(rd), dtype=bool)
+        marks = mk.marking_polygons(_lines_by_class(rd[~one_way], bridge=False),
+                                    _lines_by_class(rd[one_way], bridge=False), road_scale, tile, road_polys)
+        for role, poly in marks.items():
+            v, f = gnd.drape_polygons(np.asarray([poly], dtype=object), step, ground_z, lift + 0.12)
+            if len(f):
+                meshes.append(Mesh(name=f"markings:{role}", role=role, vertices=v.astype(np.float32), faces=f,
+                                   shadowed=np.zeros(len(f), dtype=bool), flat=True, depth_bias=bias))
     if opts.rails and data.rails is not None and len(data.rails):
         rail_poly = shapely.union_all(shapely.buffer(data.rails, 2.2 * road_scale, cap_style="flat", quad_segs=2))
         rail_poly = shapely.intersection(rail_poly, tile)

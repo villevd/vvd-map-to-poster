@@ -17,7 +17,10 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 # Road classes cars drive on, with the cruising speed of each (m/s). Service roads are left out.
-CAR_ROAD_SPEED = {"motorway": 27.0, "primary": 14.0, "secondary": 11.0, "tertiary": 9.0, "residential": 5.5}   # ~97, 50, 40, 32, 20 km/h
+# Highways (motorways, and primary roads that carry a route number such as 117) 110 km/h, ordinary roads 50 km/h, small roads 30 km/h.
+KMH = 1 / 3.6
+HIGHWAY_SPEED = 110 * KMH
+CAR_ROAD_SPEED = {"motorway": HIGHWAY_SPEED, "primary": 50 * KMH, "secondary": 50 * KMH, "tertiary": 50 * KMH, "residential": 30 * KMH}
 # Relative car density per metre of road by class: busy highways carry many more cars than side streets.
 CAR_ROAD_WEIGHT = {"motorway": 6.0, "primary": 3.0, "secondary": 2.0, "tertiary": 1.3, "residential": 1.0}
 CAR_LENGTH_FRACTION = 0.00367  # car length as a share of the tile side: about 11 m on a 3 km tile
@@ -96,9 +99,9 @@ def find_roundabouts(edge_ends: list[tuple[int, int]], edge_xy: list[np.ndarray]
     for i in flagged:
         groups.setdefault(find(edge_ends[i][0]), []).append(i)
     out: dict[int, np.ndarray] = {}
-    for members in groups.values():
-        centre = np.concatenate([resample(edge_xy[i]) for i in members]).mean(axis=0)
-        for i in members:
+    for grp in groups.values():
+        centre = np.concatenate([resample(edge_xy[i]) for i in grp]).mean(axis=0)
+        for i in grp:
             out[i] = centre
     return out
 
@@ -164,7 +167,9 @@ def build_traffic(roads, signals, stop_signs, ground_z, lift: float, side: float
                 continue
             z = np.asarray(ground_z(xy[:, 0], xy[:, 1]), dtype=np.float64) + lift
             pts = np.column_stack([xy[:, 0], z, -xy[:, 1]])           # three.js: x, y (up), z = -north
-            edge = {"a": a, "b": b, "v": CAR_ROAD_SPEED[cls], "w": CAR_ROAD_WEIGHT[cls],
+            numbered = bool(re.search(r"\d", ref or ""))      # a route number makes a primary road a highway
+            speed = HIGHWAY_SPEED if cls == "primary" and numbered else CAR_ROAD_SPEED[cls]
+            edge = {"a": a, "b": b, "v": round(speed, 3), "w": CAR_ROAD_WEIGHT[cls],
                     "p": np.round(pts, 2).ravel().tolist()}
             if is_heavy_route(ref):
                 edge["h"] = 1
@@ -204,7 +209,7 @@ def build_traffic(roads, signals, stop_signs, ground_z, lift: float, side: float
         for d, i in zip(dist, idx):
             if not np.isfinite(d) or i >= len(nxy) or node_ctrl[i] >= 0:
                 continue
-            ctrl = {"k": kind}
+            ctrl: dict = {"k": kind}
             if kind == "signal":
                 cyc = float(rng.uniform(*CYCLE_RANGE))
                 ctrl.update(cyc=round(cyc, 1), off=round(float(rng.uniform(0, cyc)), 1))

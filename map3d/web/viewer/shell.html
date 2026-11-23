@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+__VIEWER_CSS__</style>
+</head>
+<body>
+<div id="findBox" hidden><input id="find" type="search" placeholder="Find a place…  (Enter to go, ↑↓ for other matches, Esc to close)" autocomplete="off"><ul id="findList"></ul></div>
+<div id="loading"><div id="lbox"><div id="ltitle">Opening the 3D model</div><ol id="lsteps"></ol><div id="lnote"></div></div></div>
+<div id="ui">
+  <h1 id="t"></h1>
+  <p class="sub" id="s"></p>
+  <span class="row">Theme</span>
+  <select id="themeSel"></select>
+  <details id="colorsBox"><summary>Colours</summary>
+    <div id="colorPickers"></div>
+    <label><input type="checkbox" id="treeMatch" checked> Trees match ground colour</label>
+    <label><input type="checkbox" id="treeRandom" checked> Random tree shades</label>
+    <div class="btns"><button id="colorReset">Reset colours</button></div>
+  </details>
+  <label><input type="checkbox" data-group="building" checked> Buildings</label>
+  <label><input type="checkbox" data-group="tree" checked> Trees</label>
+  <label><input type="checkbox" data-group="roads" checked> Roads &amp; bridges</label>
+  <label><input type="checkbox" data-group="markings" checked> Road markings</label>
+  <label id="trafficRow"><input type="checkbox" data-group="traffic" checked> Traffic (stops at real lights &amp; signs)</label>
+  <label><input type="checkbox" id="satOn"> Satellite ground (map overlay)</label>
+  <label><input type="checkbox" id="texOn"> Real building textures</label>
+  <span class="row" id="trafficSpeedRow">Traffic speed multiplier <output id="tspeedO"></output></span>
+  <input type="range" id="tspeed" min="0" max="4" step="0.25" value="1">
+  <div class="btns"><button id="landBtn">Land a plane</button></div>
+  <label><input type="checkbox" id="followBox" checked> Follow the plane</label>
+  <span class="row">Terrain exaggeration <output id="vExagO"></output></span>
+  <input type="range" id="exag" min="0.2" max="6" step="0.1" value="1">
+  <span class="row">Building height <output id="vBexagO"></output></span>
+  <input type="range" id="bexag" min="0.2" max="6" step="0.1" value="1">
+  <span class="row">Sun direction</span>
+  <input type="range" id="az" min="0" max="360" step="1">
+  <span class="row">Sun height</span>
+  <input type="range" id="el" min="8" max="85" step="1">
+  <details id="wxBox" open><summary>Weather</summary>
+    <span class="row">Conditions</span>
+    <select id="wxPreset">
+      <option value="live">Live (real weather)</option>
+      <option value="clear">Clear</option><option value="partly">Partly cloudy</option><option value="overcast">Overcast</option>
+      <option value="fog">Fog</option><option value="lightrain">Light rain</option><option value="heavyrain">Heavy rain</option>
+      <option value="snow">Snow</option><option value="blizzard">Blizzard</option><option value="storm">Thunderstorm</option>
+      <option value="custom" hidden>Custom</option>
+    </select>
+    <div id="wxManual" hidden>
+      <span class="row">Temperature <output id="wxTempO"></output></span>
+      <input type="range" id="wxTemp" min="-30" max="35" step="1" value="15">
+      <span class="row">Cloud cover <output id="wxCloudO"></output></span>
+      <input type="range" id="wxCloud" min="0" max="1" step="0.05" value="0.3">
+      <p class="sub">Sky, cloud and fog follow these in the realistic view.</p>
+    </div>
+    <label><input type="checkbox" id="rainOn"> Rain</label>
+    <input type="range" id="rainAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
+    <label><input type="checkbox" id="snowOn"> Snow</label>
+    <input type="range" id="snowAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
+    <span class="row">Wind <output id="windO"></output></span>
+    <input type="range" id="windAmt" min="0" max="1" step="0.05" value="0.3">
+  </details>
+  <label><input type="checkbox" id="real"> Realistic view (now)</label>
+  <div id="realBox" hidden>
+    <span class="row">Time of day</span>
+    <input type="range" id="tod" min="0" max="24" step="0.25" value="12">
+    <div class="btns"><button id="nowBtn">Now</button></div>
+    <p class="sub" id="realInfo"></p>
+  </div>
+  <details id="perf"><summary>Performance</summary>
+    <span class="row">Quality</span>
+    <select id="quality"><option value="auto">Auto (adapts to your GPU)</option><option value="high">High</option><option value="low">Low</option></select>
+    <label><input type="checkbox" id="shadowsOn" checked> Real-time shadows</label>
+    <label><input type="checkbox" id="fogOn"> Fog &amp; draw distance</label>
+    <span class="row">View distance <output id="ddO"></output></span>
+    <input type="range" id="dd" min="1.5" max="14" step="0.5">
+    <label id="fowRow"><input type="checkbox" id="fowOn"> Fog of war (reveal by exploring)</label>
+    <div id="stats"></div>
+  </details>
+  <span class="row">Rotation speed</span>
+  <input type="range" id="rotSpeed" min="0.1" max="8" step="0.1" value="0.8">
+  <div class="btns">
+    <button id="rot">Auto-rotate</button><button id="reset">Reset view</button><button id="shot">Save PNG</button>
+  </div>
+</div>
+<div id="hint">Left-drag to move · right-drag to orbit · scroll to zoom</div>
+<div id="credits"></div>
+
+<script type="application/json" id="cfg">__CFG__</script>
+__BLOBS__
+<script>__TRAFFIC_JS__</script>
+<script>__SEARCH_JS__</script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@__THREE__/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@__THREE__/examples/jsm/" } }
+</script>
+<script type="module">
+__VIEWER_JS__</script>
+</body>
+</html>

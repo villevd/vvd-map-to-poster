@@ -109,6 +109,30 @@ def pack_payload(meshes, i: int, j: int, theme: dict) -> dict:
     return {"i": i, "j": j, "groups": out_groups, "blobs": out_blobs}
 
 
+def model_aligned_dem(spec: dict, cx: float, cy: float, th: float, log=print):
+    """
+    Elevation for a chunk centred at model-local (cx, cy), sampled on the model's own grid.
+
+    The grid is anchored to the model's centre with the model's step, so every sample point
+    (and so every height at the seam) is the one the model itself uses. It is then shifted into
+    the chunk's own metres, which is what the chunk's meshes are built in.
+    """
+    import math
+    from .terrain import Dem, fetch_dem, grid_step_for
+
+    total = spec["half"]
+    step = grid_step_for(2 * total)
+    reach = max(abs(cx), abs(cy)) + th + 4 * step           # the chunk plus its margin, from the model's centre
+    half = total + math.ceil(reach / step) * step           # keeps the grid offset a whole number of steps
+    dem = fetch_dem(LocalFrame(spec["lat"], spec["lon"], half), cmp_cache_dir(), log=log, step=step)
+    return Dem(dem.x0 - cx, dem.y0 - cy, dem.step, dem.z, dem.source)
+
+
+def cmp_cache_dir():
+    import create_map_poster as cmp
+    return cmp.CACHE_DIR_PATH
+
+
 def build_chunk(spec: dict, i: int, j: int, log=print) -> dict:
     """Fetch the data for cell (i, j), build its detail levels and return the viewer payload."""
     import create_map_poster as cmp   # heavy (OpenStreetMap stack): only when a chunk is really built
@@ -148,7 +172,7 @@ def build_chunk(spec: dict, i: int, j: int, log=print) -> dict:
     # The elevation grid covers the whole model-sized area around the chunk, so its step (and so its
     # heights at the seams) matches the model's own terrain.
     try:
-        dem = fetch_dem(LocalFrame(clat, clon, total), cmp.CACHE_DIR_PATH, log=log)
+        dem = model_aligned_dem(spec, cx, cy, th, log)
     except Exception as e:                                  # no terrain: flat, at the model's ground level
         log(f"⚠ Terrain unavailable for chunk {i},{j} ({e}); it will be flat.")
         dem = Dem.flat(cell, level=spec["zmin"])

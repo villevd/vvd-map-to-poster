@@ -94,6 +94,44 @@ class BuildingGeometry(unittest.TestCase):
         self.assertFalse(h.estimated[0])
 
 
+class RoofZFighting(unittest.TestCase):
+    """Roofs at the same height must never overlap in plan, or the GPU shimmers between them (z-fighting)."""
+
+    def roof_overlap_area(self, geoms, **tags):
+        b = make_buildings(geoms, **tags)
+        res = bld.build_buildings(b, bld.resolve_heights(b), flat_ground, exag=1.0)
+        m = res.mesh
+        tri = m.vertices[m.faces].astype(np.float64)
+        up = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])[:, 2] > 1e-6
+        roofs = shapely.polygons(np.concatenate([tri[up][:, :, :2], tri[up][:, :1, :2]], axis=1))
+        i, j = shapely.STRtree(roofs).query(roofs, predicate="intersects")
+        k = i < j
+        return float(shapely.area(shapely.intersection(roofs[i[k]], roofs[j[k]])).sum()), roofs
+
+    def test_same_height_overlap_is_cut(self):
+        a, b = box(0, 0, 20, 20), box(10, 5, 30, 25)          # overlap 10 x 15 = 150 m2, both 9 m high
+        overlap, roofs = self.roof_overlap_area([a, b], height=9.0, kind="commercial")
+        self.assertAlmostEqual(overlap, 0.0, places=3)
+        self.assertAlmostEqual(float(shapely.area(roofs).sum()), a.union(b).area, delta=0.5)   # nothing lost either
+
+    def test_part_inside_a_building_keeps_its_roof(self):
+        parent, part = box(0, 0, 40, 40), box(10, 10, 20, 20)
+        overlap, roofs = self.roof_overlap_area([parent, part], height=12.0, kind="commercial")
+        self.assertAlmostEqual(overlap, 0.0, places=3)
+        self.assertTrue(shapely.intersects(box(12, 12, 18, 18), shapely.union_all(roofs)))      # the part is still there
+
+    def test_different_heights_are_left_alone(self):
+        a, b = box(0, 0, 20, 20), box(10, 5, 30, 25)
+        bs = make_buildings([a, b], kind="commercial")
+        bs["height"] = [9.0, 15.0]
+        res = bld.build_buildings(bs, bld.resolve_heights(bs), flat_ground, exag=1.0)
+        tri = res.mesh.vertices[res.mesh.faces]
+        up = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])[:, 2] > 1e-6
+        self.assertAlmostEqual(float(shapely.area(shapely.polygons(
+            np.concatenate([tri[up][:, :, :2], tri[up][:, :1, :2]], axis=1).astype(np.float64))).sum()),
+            a.area + b.area, delta=0.5)                       # both roofs complete: the lower one is not trimmed
+
+
 class GroundTiling(unittest.TestCase):
     def test_triangles_tile_the_square_exactly(self):
         half, step = 200.0, 8.0
@@ -150,6 +188,26 @@ class Exporters(unittest.TestCase):
         tris = np.frombuffer(raw[84:], dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))
         self.assertAlmostEqual(float(tris["v"][..., 0].max() - tris["v"][..., 0].min()), 100.0, delta=0.01)
         self.assertAlmostEqual(float(tris["v"][..., 2].min()), 0.0, places=4)
+
+    def test_html_has_weather_controls_and_gpu_particles(self):
+        with tempfile.TemporaryDirectory() as d:
+            html = export_html(self.scene, THEME, os.path.join(d, "m.html")).read_text(encoding="utf-8")
+        for control in ("rainOn", "rainAmt", "snowOn", "snowAmt", "windAmt"):
+            self.assertIn(f'id="{control}"', html)
+        self.assertIn("const PRECIP", html)
+        self.assertIn("setDrawRange", html)                      # intensity = how many particles are drawn
+        self.assertIn("uTime * speed", html)                     # positions come from a time uniform in the shader ...
+        for old in ("RAIN_DROPS", "SNOW_FLAKES", "R.pos", "S.pos"):
+            self.assertNotIn(old, html)                          # ... not from per-frame CPU updates
+
+    def test_html_has_manual_weather(self):
+        with tempfile.TemporaryDirectory() as d:
+            html = export_html(self.scene, THEME, os.path.join(d, "m.html")).read_text(encoding="utf-8")
+        for control in ("wxPreset", "wxTemp", "wxCloud"):
+            self.assertIn(f'id="{control}"', html)
+        for preset in ("live", "clear", "partly", "overcast", "fog", "lightrain", "heavyrain", "snow", "blizzard", "storm"):
+            self.assertIn(f'<option value="{preset}"', html)
+        self.assertIn("if (REAL.manual)", html)                  # the live fetch steps aside for weather set by hand
 
     def test_html_is_self_contained(self):
         with tempfile.TemporaryDirectory() as d:
@@ -327,6 +385,43 @@ class ViewerFacts(unittest.TestCase):
         self.assertNotIn("road_paths", facts)
         json.dumps(facts)                       # must serialise into the viewer's config block
         self.assertEqual(_facts({}), {})
+
+
+class RoadMarkings(unittest.TestCase):
+    """Centre and edge lines: which roads get paint, and that it stays on the road surface."""
+
+    @staticmethod
+    def _paint(two_way, one_way=None):
+        from shapely.geometry import LineString
+        from map3d import markings as mk
+        lines = {c: np.asarray([LineString(p) for p in ls], dtype=object) for c, ls in two_way.items()}
+        ones = {c: np.asarray([LineString(p) for p in ls], dtype=object) for c, ls in (one_way or {}).items()}
+        tile = box(-500, -500, 500, 500)
+        road_polys = gnd.road_polygons({**lines, **ones}, 1.0, tile, None)
+        return mk.marking_polygons(lines, ones, 1.0, tile, road_polys), road_polys
+
+    def test_two_way_primary_gets_double_yellow_and_white_edges(self):
+        paint, roads = self._paint({"primary": [[(-100, 0), (100, 0)]]})
+        self.assertIn("marking_yellow", paint)
+        self.assertIn("marking_white", paint)
+        # Yellow stays inside the road surface, centred on it
+        self.assertTrue(shapely.within(paint["marking_yellow"], roads["primary"].buffer(0.01)))
+        self.assertLess(paint["marking_yellow"].bounds[1], 0.0)
+        self.assertGreater(paint["marking_yellow"].bounds[3], 0.0)
+
+    def test_one_way_has_edges_but_no_centre(self):
+        paint, _ = self._paint({}, {"primary": [[(-100, 0), (100, 0)]]})
+        self.assertNotIn("marking_yellow", paint)
+        self.assertIn("marking_white", paint)
+
+    def test_residential_and_service_roads_are_unpainted(self):
+        paint, _ = self._paint({"residential": [[(-100, 0), (100, 0)]], "service": [[(0, -100), (0, 100)]]})
+        self.assertEqual(paint, {})
+
+    def test_tertiary_gets_single_yellow_centre_only(self):
+        paint, _ = self._paint({"tertiary": [[(-100, 0), (100, 0)]]})
+        self.assertIn("marking_yellow", paint)
+        self.assertNotIn("marking_white", paint)
 
 
 if __name__ == "__main__":
