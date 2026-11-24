@@ -2,7 +2,7 @@
 // Layers, imagery, exaggeration, sun, fog and quality come back as they were left. The theme is not stored here:
 // the GUI chooses it per model.
 const VIEW_KEY = 'map3d-view';
-const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'texag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality', 'cullOn'];
+const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'texag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality', 'cullOn', 'cullMin', 'roadOp', 'ugMode', 'ugPos', 'ugSize', 'ugDepth', 'ugMines', 'ugDrill', 'ugClaims'];
 const VIEW_GROUPS = ['building', 'tree', 'roads', 'markings', 'traffic'];
 const groupBox = g => document.querySelector(`input[data-group="${g}"]`) || (PARENT_DOC && PARENT_DOC.querySelector(`input[data-group="${g}"]`));
 let viewRestoring = false;
@@ -50,10 +50,11 @@ function camSave() {
 function camRestore() {
   try {
     const s = JSON.parse(localStorage.getItem(CAM_KEY) || 'null');
-    if (s && s.p && s.t) { camera.position.fromArray(s.p); controls.target.fromArray(s.t); controls.update(); }
+    if (s && s.p && s.t) { camera.position.fromArray(s.p); controls.target.fromArray(s.t); controls.update(); return true; }
   } catch (e) {}
+  return false;
 }
-camRestore();
+if (!camRestore()) horizonView();   // Sky view is the default start view; a camera the user left elsewhere is kept
 controls.addEventListener('end', camSave);
 
 // Depth precision: the near and far planes follow the camera instead of spanning the whole model all the time.
@@ -67,12 +68,18 @@ function fitClip() {
   camera.far = dist + H * 6;
   camera.updateProjectionMatrix();
 }
+let trafficAcc = 0, trafficFrame = 0;
 renderer.setAnimationLoop(now => {
+  const cpu0 = performance.now();
   const dt = Math.min((now - lastFrameT) / 1000, 0.1);
   const dtReal = Math.min((now - lastFrameT) / 1000, 1);   // the plane keeps real time even when frames are slow
   lastFrameT = now;
-  trafficRoot.visible = layers.traffic;
-  if (trafficUpdate && layers.traffic) trafficUpdate(dt * (+$('tspeed').value), REAL.on);
+  const trafficShown = layers.traffic && !PERF.noTraffic;   // under heavy load traffic stops being simulated at all
+  trafficRoot.visible = trafficShown;
+  trafficAcc += dt;
+  if (trafficUpdate && trafficShown && !(PERF.halfTraffic && (trafficFrame++ & 1))) {   // half rate under load, same speed
+    trafficUpdate(trafficAcc * (+$('tspeed').value), REAL.on); trafficAcc = 0;
+  } else if (!trafficShown) trafficAcc = 0;
   if (planeUpdate) planeUpdate(dtReal);
   keyMove(dt);
   controls.update();
@@ -85,7 +92,9 @@ renderer.setAnimationLoop(now => {
   stepRealistic(now);
   cakeUpdate(now);
   placeSearch.update(now);
+  if (ugUpdate) ugUpdate(now);
   renderer.render(scene, camera);
+  PERF.cpuSample(performance.now() - cpu0);   // JavaScript time of this frame: the bottleneck probe compares it to the frame time
   if (!window.__ready && tileList.some(t => t.shown >= 0)) {
     $('loading').classList.add('done'); window.__ready = true;
   } else if (!window.__ready) {

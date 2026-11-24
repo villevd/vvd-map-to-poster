@@ -19,6 +19,7 @@ const PERF = {
   bound: 'ok',             // 'cpu' | 'gpu' | 'ok': what limits the frame rate right now
   cpuMs: 0,                // JavaScript time per frame (everything in the animation loop, render submission included)
   potato: false,           // Quality = Potato
+  treeKeep: 1,             // share of trees drawn (1 = all)
   shadowRes: 4096, texScale: 1, lite: false, noTraffic: false, halfTraffic: false,
   // world distance from the camera beyond which each kind of object is hidden (Infinity = not culled)
   cuts: { tile: Infinity, tree: Infinity, markings: Infinity, roads: Infinity, building: Infinity, car: Infinity },
@@ -44,11 +45,20 @@ const PERF = {
     }
     this.pumpTextures();
     const far = +dd.value * T, a = this.aggr;
-    // Each kind has its own speed: trees, markings and cars vanish first, buildings last.
-    // cut = far * (floor + (1 - floor) * (1 - min(1, a * k))): once k * a reaches 1 the kind is down to its floor fraction.
+    // Two limits per kind, the nearer one wins:
+    //  - distance: a share of the draw distance. cut = far * (floor + (1 - floor) * (1 - min(1, a * k))). Each kind goes at its
+    //    own speed: trees, markings and cars first, buildings last.
+    //  - size on screen: hidden once it is thinner than a few pixels. This is what matters for a model seen whole from
+    //    a distance (a single tile never crosses a draw-distance cut, but its trees are two pixels tall).
     const cut = (floor, k) => (a > 0 ? far * (floor + (1 - floor) * (1 - Math.min(1, a * k))) : Infinity);
+    const px = a > 0 ? innerHeight / (2 * Math.tan(camera.fov * Math.PI / 360)) : 0;   // pixels per metre at 1 m distance
+    const a15 = Math.pow(a, 1.5);
+    const size = (metres, base, span) => (a > 0 ? metres * px / (base + span * a15) : Infinity);   // distance at which it is thinner than that many pixels
+    const m = Math.min;
     this.cuts = { tile: a > 0 ? far * (1 - 0.65 * a) : Infinity,
-      tree: cut(0, 1.3), markings: cut(0, 1.6), car: cut(0, 1.5), roads: cut(0.1, 1.0), building: cut(0.05, 0.9) };
+      tree: m(cut(0, 1.3), size(14, 0.4, 14)), markings: m(cut(0, 1.6), size(0.8, 0.5, 6)), car: m(cut(0, 1.5), size(2, 0.6, 8)),
+      roads: m(cut(0.1, 1.0), size(6, 0.5, 3)), building: m(cut(0.05, 0.9), size(14, 0.5, 5)) };
+    this.treeKeep = a > 0 ? Math.max(0.06, 1 - 1.15 * a) : 1;   // share of trees drawn: thins out long before they disappear
   },
   // The controller: the shortfall against the target frame rate drives both axes; the bottleneck decides which goes further.
   control(now) {

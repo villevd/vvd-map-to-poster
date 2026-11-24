@@ -71,7 +71,7 @@ function makeImpostors(arr, n) {
       }`,
   });
   const m = new THREE.Mesh(geo, mat);
-  m.frustumCulled = false; m.userData.impostor = true; m.userData.role = 'tree'; m.userData.group = 'tree';
+  m.frustumCulled = false; m.userData.impostor = true; m.userData.n = n; m.userData.role = 'tree'; m.userData.group = 'tree';
   return m;
 }
 

@@ -13,6 +13,17 @@ function nearestReady(tile, wantLod) {
   return -1;
 }
 const cam = new THREE.Vector3(), _cellPos = new THREE.Vector3();
+// Trees are whole models laid out one after another in the index buffer (and instances in the impostor buffer), so
+// drawing only the first share of them thins the forest evenly. Trees are the bulk of the triangles in most models.
+function thinTrees(o, keep) {
+  const g = o.geometry;
+  if (o.userData.impostor) {
+    if (o.userData.n === undefined) o.userData.n = g.instanceCount;
+    g.instanceCount = Math.ceil(o.userData.n * keep);
+  } else if (g.index) {
+    g.setDrawRange(0, Math.ceil(g.index.count * keep / 3) * 3);
+  }
+}
 function updateTiles() {
   cam.copy(camera.position);
   const far = +dd.value * T;
@@ -22,7 +33,7 @@ function updateTiles() {
     const d = cam.distanceTo(t.center);
     if (controls.target.distanceTo(t.center) < 1.2 * T) t.explored = true;
     // Hidden tiles (past the draw distance, or unexplored under the fog of war) cost nothing: they are not even loaded
-    const hidden = (fogOn.checked && d > far * 1.15) || (fowOn.checked && !t.explored) || d > cuts.tile;
+    const hidden = (fogOn.checked && d > far * 1.15) || (fowOn.checked && !t.explored) || d > cuts.tile || (UG_STATE.on && t.extra);
     const wantLod = lodFor(d);
     if (!hidden) {
       want(t, maxLod, 0);
@@ -44,6 +55,7 @@ function updateTiles() {
           _cellPos.copy(o.userData.cellC).add(lvObj.position);
           o.visible = layers.tree && (cuts.tree === Infinity || cam.distanceTo(_cellPos) <= cuts.tree);
         } else if (g && g in layers) o.visible = layers[g] && !gHide[g];
+        if (o.userData.role === 'tree' && o.geometry) thinTrees(o, PERF.treeKeep);   // under load, draw only a share of the trees
         if (o.isMesh && !o.userData.impostor) { o.castShadow = casts && o.userData.cast; o.receiveShadow = wantShadow && o.userData.receive && show === 0; }
       });
     }

@@ -102,7 +102,7 @@ const PRECIP = (() => {
       U.uTime.value = now / 1000;
       U.uWind.value.set(st.wind * 0.9, st.wind * 0.25);
       renderer.getDrawingBufferSize(size); U.uRes.value = size.y;
-      const q = (quality.value === 'low' ? 0.5 : 1) * st.scale;                    // quality setting and the adaptive controller
+      const q = (quality.value === 'low' ? 0.5 : 1) * st.scale * (1 - 0.85 * PERF.gfx);                    // quality setting and the adaptive controller
       rg.setDrawRange(0, Math.round(MAX * Math.pow(r, 1.4) * q) * 2);
       sg.setDrawRange(0, Math.round(MAX * Math.pow(s_, 1.4) * q));
     },
@@ -146,10 +146,13 @@ varying vec3 vWp;
 uniform float uNight; uniform float uLit; uniform float uSnow;
 float hash21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-  vec3 fN = normalize(cross(dFdx(vWp), dFdy(vWp)));
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.94, 0.96, 0.98), uSnow * smoothstep(0.6, 0.85, fN.y));`)
+  vec3 fN = vec3(0.0, 1.0, 0.0);
+  if (uSnow > 0.001 || uNight > 0.001) {   // by day, without snow, skip the derivative maths entirely
+    fN = normalize(cross(dFdx(vWp), dFdy(vWp)));
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.94, 0.96, 0.98), uSnow * smoothstep(0.6, 0.85, fN.y));
+  }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-  {
+  if (uNight > 0.001) {
     vec3 tN = normalize(cross(fN, vec3(0.0, 1.0, 0.0)));
     float wall = 1.0 - smoothstep(0.45, 0.75, abs(fN.y));
     vec2 cell = vec2(dot(vWp, tN) / 3.2, vWp.y / 3.4);
@@ -385,7 +388,7 @@ function paintSeason() {
 function stepRealistic(now) {
   const dt = Math.min(0.1, Math.max(0, (now - REAL.t) / 1000)); REAL.t = now;
   if (!REAL.on || !REAL.cars) return;
-  const C = REAL.cars, n = trafficUpdate ? 0 : Math.min(Math.round(MAX_CARS * REAL.traffic), C.state.length), dummy = C.dummy, P = C.lightPos;
+  const C = REAL.cars, n = trafficUpdate || PERF.noTraffic ? 0 : Math.min(Math.round(MAX_CARS * REAL.traffic), C.state.length), dummy = C.dummy, P = C.lightPos;
   for (let i = 0; i < n; i++) {
     const st = C.state[i];
     st.s += st.dir * st.v * dt;
@@ -435,7 +438,7 @@ applyTheme(CFG.theme); applyFog();
 tileList.forEach(t => { if (t.center.distanceTo(controls.target) < 0.5 * T) t.explored = true; });
 let tick = 0;
 controls.addEventListener('change', placeSun);
-window.__map3d = { updateTiles, tileList, explore: k => { const t = tiles.get(k); if (t) t.explored = true; } };
+window.__map3d = { updateTiles, tileList, PERF, renderer, scene, root, camera, controls, T, dd, quality, getRatio: () => ratio, explore: k => { const t = tiles.get(k); if (t) t.explored = true; } };
 
 // ---------------------------------------------------------------- weather set by hand
 // A preset (or the temperature / cloud sliders plus the Rain and Snow controls) replaces the live weather: in the realistic view

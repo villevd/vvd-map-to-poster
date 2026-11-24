@@ -51,7 +51,7 @@ function waterMaterial(flat) {
   if (!waterEnv) updateWaterEnv();
   // Physical material with a clear-coat: the sky dome shows in the water at all angles and strongly at grazing ones
   const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.03, metalness: 0.2, ior: 1.33, specularIntensity: 1,
-    clearcoat: 0.8, clearcoatRoughness: 0.04, envMap: waterEnv, envMapIntensity: 1.25, flatShading: flat });
+    clearcoat: PERF.lite ? 0 : 0.8, clearcoatRoughness: 0.04, envMap: waterEnv, envMapIntensity: 1.25, flatShading: flat });
   waterMats.push(m);
   return m;
 }
@@ -129,6 +129,7 @@ async function buildSatCanvas(tile, boost = 0, cap = 144) {
   });
   return c;
 }
+const satTexs = new Set();   // every live satellite texture, so PERF can shrink them all
 /** A picture (canvas or ImageBitmap) as a texture for the ground and roofs. */
 function satTextureFrom(src) {
   // An ImageBitmap is not flipped on upload the way a canvas is, so a picture read back from storage would sit upside
@@ -141,7 +142,11 @@ function satTextureFrom(src) {
   }
   const tex = new THREE.Texture(src);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  tex.userData.full = src;                      // PERF re-cuts it smaller under load, from this full-size picture
+  satTexs.add(tex);
+  tex.addEventListener('dispose', () => { if (!tex.userData.resizing) satTexs.delete(tex); });
+  tex.anisotropy = PERF.lite ? 1 : Math.min(16, renderer.capabilities.getMaxAnisotropy());
+  PERF.fitTexture(tex);
   tex.needsUpdate = true;
   return tex;
 }
@@ -255,7 +260,9 @@ async function syncImagery(tile) {
   const meshes = [];
   for (const lv of Object.values(tile.levels)) if (lv.obj) lv.obj.traverse(o => { if (o.userData.img && o.material) meshes.push(o); });
   if (!meshes.length) return;
-  const tex = meshes.some(m => imgOn[m.userData.img]) ? await satTexture(tile) : null;
+  // Under heavy load (PERF.texScale 0) the pictures are not even fetched: flat theme colours cost nothing
+  const tex = PERF.texScale > 0 && meshes.some(m => imgOn[m.userData.img]) ? await satTexture(tile) : null;
+  if (tex) PERF.fitTexture(tex);
   for (const m of meshes) {
     const on = !!tex && imgOn[m.userData.img];
     m.userData.textured = on;
@@ -301,17 +308,21 @@ async function loadGroup(tile, lod) {
       : new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: m.tint !== undefined, flatShading: m.flat,
           side: m.role === 'bridge_side' ? THREE.DoubleSide : THREE.FrontSide });
     if (m.overlay) { mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2; }
+    if (m.group === 'roads' || m.group === 'markings') { roadMats.add(mat); if (roadAlpha < 1) applyRoadAlpha(mat); }
     if (m.role === 'building') addWindows(mat);
     if (m.base !== undefined) g.setAttribute('aBase', new THREE.BufferAttribute(new Float32Array(buf, m.base, m.nv), 1));
     if (m.base !== undefined) heightScale(mat, m.role === 'tree' ? heightU.uTF : heightU.uBF);
+    cutMaterial(mat);   // the underground cutaway can discard what lies inside its cut region
     const mesh = new THREE.Mesh(g, mat);
     if (m.variant !== undefined && m.tint !== undefined) {
       const ca = g.getAttribute('color').array, grey = new Float32Array(m.nv);
       for (let i = 0; i < m.nv; i++) grey[i] = ca[i * 3];
       mesh.userData.treeVar = { n: m.nv, grey, variant: new Uint8Array(buf, m.variant, m.nv) };
     }
-    if (m.base !== undefined && m.cast) {
-      mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }); heightScale(mesh.customDepthMaterial, m.role === 'tree' ? heightU.uTF : heightU.uBF);
+    if (m.cast && (m.base !== undefined || CFG.underground)) {
+      mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      if (m.base !== undefined) heightScale(mesh.customDepthMaterial, m.role === 'tree' ? heightU.uTF : heightU.uBF);
+      cutMaterial(mesh.customDepthMaterial);   // a cut-away piece of the city must not keep casting its shadow
     }
     Object.assign(mesh.userData, { role: m.role, group: m.group, cast: m.cast, receive: m.receive, img: IMG_KIND[m.role] });
     if (m.cell) mesh.userData.cellC = new THREE.Vector3(m.cell[0], m.cell[1], m.cell[2]);   // tree cell: culled by its own distance
@@ -326,6 +337,7 @@ async function loadGroup(tile, lod) {
   actEnd(actId);
   setLayers(group);
   if (imgOn.sat || imgOn.bld) syncImagery(tile);
+  if (ugTileReady) ugTileReady();   // the underground block follows the terrain: it needs this tile's ground
 }
 for (const [id, kind] of [['satOn', 'sat'], ['texOn', 'bld']]) {
   $(id).onchange = () => { imgOn[kind] = $(id).checked; tileList.forEach(t => syncImagery(t)); updateCredits(); };
@@ -333,6 +345,21 @@ for (const [id, kind] of [['satOn', 'sat'], ['texOn', 'bld']]) {
 document.querySelectorAll('input[data-group]').forEach(cb => {
   cb.onchange = () => { layers[cb.dataset.group] = cb.checked; tileList.forEach(t => Object.values(t.levels).forEach(l => l.obj && setLayers(l.obj))); };
 });
+// Road transparency: roads and their markings fade out so the buildings and ground show through.
+// 1 is opaque (the default); below 1 the road materials become transparent.
+const roadMats = new Set();
+let roadAlpha = 1;
+function applyRoadAlpha(mat) {
+  mat.transparent = roadAlpha < 1; mat.opacity = roadAlpha; mat.depthWrite = roadAlpha >= 1;
+  mat.needsUpdate = true;
+}
+function setRoadAlpha(v) {
+  roadAlpha = v;
+  $('roadOpO').textContent = Math.round(v * 100) + '%';
+  roadMats.forEach(applyRoadAlpha);
+}
+$('roadOp').oninput = () => setRoadAlpha(+$('roadOp').value);
+$('roadOpO').textContent = '100%';
 // Terrain exaggeration scales the whole model vertically; building and tree height then rescale heights above the
 // ground (per-vertex 'aBase') so the three are independent. All start at the values the model was built with.
 const EXC = CFG.exag || { terrain: 1, building: 1 };   // models made before this setting existed

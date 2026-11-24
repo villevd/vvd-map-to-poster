@@ -68,6 +68,9 @@
   #perfHud[data-band=bad] #phFps { color: #e74c3c; }
   #perfHud .ph-cull { margin-top: 5px; font-size: 11px; opacity: .75; max-width: 220px; }
   #perfHud .ph-toggle { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; cursor: pointer; }
+  #perfHud .ph-slider { display: block; margin-top: 5px; font-size: 11px; }
+  #perfHud .ph-slider input { display: block; width: 100%; accent-color: var(--text); }
+  #perfHud #phBound { white-space: pre-line; }
   #perfHud .ph-toggle input { accent-color: var(--text); }
   #perfHud #phGraph { display: block; width: 100%; height: 80px; margin-top: 8px; border-radius: 6px;
     background: color-mix(in srgb, var(--text) 6%, transparent); }
@@ -85,3 +88,14 @@
   #colorsBox summary { cursor: pointer; opacity: .85; margin-bottom: 4px; }
   .cpick { display: flex; justify-content: space-between; align-items: center; margin: 3px 0; }
   .cpick input[type=color] { width: 44px; height: 22px; border: none; background: none; padding: 0; cursor: pointer; }
+  #ui #ugLegend { margin-top: 8px; font-size: 12px; }
+  #ui .ugRow { display: flex; gap: 8px; align-items: flex-start; margin: 5px 0; }
+  #ui .ugRow i { flex: none; width: 14px; height: 14px; margin-top: 2px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--text) 40%, transparent); }
+  #ui .ugRow span { display: flex; flex-direction: column; line-height: 1.25; }
+  #ui .ugRow small, #ui #ugLegend p { opacity: .7; font-size: 11px; margin: 4px 0; }
+  #ui #ugLegend .ugNote { opacity: .55; }
+  #ui #ugBox[hidden], #ui #ugPosRow[hidden], #ui #ugSizeRow[hidden], #ui #ugDigRow[hidden] { display: none; }
+  #ugTip { position: fixed; z-index: 6; pointer-events: none; max-width: 250px; padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.35;
+    color: var(--text); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); }
+  #ugTip small { opacity: .6; }

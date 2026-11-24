@@ -74,7 +74,7 @@ function horizonView() {
     controls.target.z + r * Math.cos(el) * Math.cos(az));
   controls.update();
   const fwd = controls.target.clone().sub(camera.position), flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
-  const up = 0.12;   // radians above the horizon: the sky fills the top of the frame, the city shows at the bottom
+  const up = 0.22;   // radians above the horizon: the frame's top is the blue upper sky, not the pale sun glow at the horizon
   skyDir = flat.multiplyScalar(Math.cos(up)).add(new THREE.Vector3(0, Math.sin(up), 0));
 }
 $('horizon').onclick = horizonView;

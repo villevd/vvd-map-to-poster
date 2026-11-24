@@ -74,7 +74,7 @@ async function loadChunk(c) {
 function requestChunks() {
   const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 350);
   skelMat.opacity = 0.12 + 0.12 * pulse; skelLineMat.opacity = 0.35 + 0.35 * pulse;
-  if (chunkOff) return;
+  if (chunkOff || UG_STATE.on) return;   // the underground view is a closed block: no new chunks beyond its edge
   const [ci, cj] = cellOf(controls.target);
   for (const t of [...tileList]) {
     if (!t.extra) continue;
