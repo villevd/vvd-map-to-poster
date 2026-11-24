@@ -115,19 +115,27 @@ async function buildSatCanvas(tile, boost = 0, cap = 144) {
   }
   const cells = [];
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) cells.push([tx, ty]);
-  const bitmaps = await Promise.all(cells.map(([tx, ty]) => satBitmap(z, tx, ty)));
-  if (!bitmaps.some(Boolean)) return null;
-  const c = document.createElement('canvas'); c.width = c.height = S;
-  const g = c.getContext('2d');
-  g.fillStyle = '#1a1c16'; g.fillRect(0, 0, S, S);
-  c.incomplete = bitmaps.some(b => !b);   // a missing picture tile leaves a dark hole: such a picture is not worth storing
-  const px = lon => (lon - w) / (e - w) * S, py = lat => (n - lat) / (n - s) * S;
-  cells.forEach(([tx, ty], i) => {
-    const bmp = bitmaps[i]; if (!bmp) return;
-    const l = px(tile2lon(tx, z)), r = px(tile2lon(tx + 1, z)), t = py(tile2lat(ty, z)), b = py(tile2lat(ty + 1, z));
-    g.drawImage(bmp, l, t, r - l, b - t);
-  });
-  return c;
+  const actId = actStart('Satellite ground', `tile ${tile.key} · 0/${cells.length} pictures`);
+  try {
+    let got = 0;
+    const bitmaps = await Promise.all(cells.map(([tx, ty]) => satBitmap(z, tx, ty).then(b => {
+      actUpdate(actId, `tile ${tile.key} · ${++got}/${cells.length} pictures (zoom ${z})`); return b;
+    })));
+    if (!bitmaps.some(Boolean)) return null;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1a1c16'; g.fillRect(0, 0, S, S);
+    c.incomplete = bitmaps.some(b => !b);   // a missing picture tile leaves a dark hole: such a picture is not worth storing
+    const px = lon => (lon - w) / (e - w) * S, py = lat => (n - lat) / (n - s) * S;
+    const slice = sliceYielder(8);          // drawing hundreds of pictures is sliced, so the page keeps responding
+    for (let i = 0; i < cells.length; i++) {
+      const [tx, ty] = cells[i], bmp = bitmaps[i]; if (!bmp) continue;
+      const l = px(tile2lon(tx, z)), r = px(tile2lon(tx + 1, z)), t = py(tile2lat(ty, z)), b = py(tile2lat(ty + 1, z));
+      g.drawImage(bmp, l, t, r - l, b - t);
+      if (cells.length > 20 && i % 8 === 7) { actUpdate(actId, `tile ${tile.key} · assembling ${i + 1}/${cells.length}`); await slice(); }
+    }
+    return c;
+  } finally { actEnd(actId); }
 }
 const satTexs = new Set();   // every live satellite texture, so PERF can shrink them all
 /** A picture (canvas or ImageBitmap) as a texture for the ground and roofs. */
@@ -279,30 +287,47 @@ async function loadGroup(tile, lod) {
   const lv = tile.levels[lod]; if (!lv || lv.state !== 'idle') return;
   lv.state = 'loading';
   const actId = actStart(lv.cfg.id ? 'Model tile' : 'Edge chunk tile', `detail ${lod} · ${(lv.cfg.meshes || []).length} meshes`);
+  lv.actId = actId;
   const el = lv.cfg.id ? $(lv.cfg.id) : null;  // standalone pages keep model tiles in a <script>; chunks carry them inline
+  const what = `${lv.cfg.id ? 'tile' : 'chunk'} ${tile.key} · detail ${lod}`;
+  const nMesh = (lv.cfg.meshes || []).length;
   let src;
-  if (lv.cfg.b64) src = lv.cfg.b64;
-  else if (CFG.blobBase && lv.cfg.id) {        // baked map: the tile is fetched from the map (compressed, as stored)
-    const r = await fetch(CFG.blobBase + encodeURIComponent(lv.cfg.id), { cache: 'no-store' });
-    if (!r.ok) throw new Error(`tile ${lv.cfg.id}: HTTP ${r.status}`);
-    src = await r.arrayBuffer();
-  } else src = el.textContent.trim();
-  const buf = await inflate(src);
+  {
+    if (lv.cfg.b64) src = lv.cfg.b64;
+    else if (CFG.blobBase && lv.cfg.id) {        // baked map: the tile is fetched from the map (compressed, as stored)
+      actUpdate(actId, `${what} · downloading`);
+      const r = await fetch(CFG.blobBase + encodeURIComponent(lv.cfg.id), { cache: 'no-store' });
+      if (!r.ok) throw new Error(`tile ${lv.cfg.id}: HTTP ${r.status}`);
+      src = await r.arrayBuffer();
+    } else src = el.textContent.trim();
+    const size = typeof src === 'string' ? src.length : src.byteLength;
+    LOAD.bytes += size;
+    // Unpacking, normals, UVs and tint colours run in a worker; the main thread only wraps the results in GPU buffers
+    const uvRoles = {}; for (const k of Object.keys(IMG_KIND)) uvRoles[k] = true;
+    const parsed = await workRun('tile', { src, meshes: lv.cfg.meshes, uvRoles, x0: tile.center.x - T / 2, zN: tile.center.z - T / 2, T },
+      typeof src === 'string' ? [] : [src],
+      (stage, w) => actUpdate(actId, `${what} · ${stage}${w ? ` (worker ${w})` : ''}`));
+    actUpdate(actId, `${what} · building ${nMesh} meshes`);
+    return await finishGroup(tile, lod, lv, el, parsed, actId);
+  }
+}
+async function finishGroup(tile, lod, lv, el, parsed, actId) {
+  const { buf, meshes: pm } = parsed;
   lv.cfg.b64 = null; if (el) el.textContent = '';   // free the base64 text once decoded
   const group = new THREE.Group(); group.visible = false;
-  for (const m of lv.cfg.meshes) {
+  const slice = sliceYielder(6);   // a tile with many meshes is built in slices so frames keep coming
+  const imp0 = impostorUniforms.length;
+  for (let mi = 0; mi < lv.cfg.meshes.length; mi++) {
+    await slice();
+    const m = lv.cfg.meshes[mi], pw = pm[mi];
     const g = new THREE.BufferGeometry();
     const posArr = new Float32Array(buf, m.pos, m.nv * 3);
     g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-    if (IMG_KIND[m.role]) g.setAttribute('uv', new THREE.BufferAttribute(tileUV(posArr, tile), 2));
+    if (pw.uv) g.setAttribute('uv', new THREE.BufferAttribute(pw.uv, 2));
     g.setIndex(new THREE.BufferAttribute(m.idx16 ? new Uint16Array(buf, m.idx, m.nf * 3) : new Uint32Array(buf, m.idx, m.nf * 3), 1));
-    if (m.tint !== undefined) {
-      const bytes = new Uint8Array(buf, m.tint, m.nv), t = new Float32Array(m.nv * 3);
-      for (let i = 0; i < m.nv; i++) { const v = bytes[i] / 127.5; t[i * 3] = t[i * 3 + 1] = t[i * 3 + 2] = v; }
-      g.setAttribute('color', new THREE.BufferAttribute(t, 3));
-    }
+    if (pw.color) g.setAttribute('color', new THREE.BufferAttribute(pw.color, 3));
     if (m.nrm !== undefined) g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(buf, m.nrm, m.nv * 3), 3, true));
-    else if (!m.flat) g.computeVertexNormals();
+    else if (pw.normal) g.setAttribute('normal', new THREE.BufferAttribute(pw.normal, 3));
     g.computeBoundingSphere();
     const mat = m.role === 'water' ? waterMaterial(m.flat)
       : new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: m.tint !== undefined, flatShading: m.flat,
@@ -315,9 +340,7 @@ async function loadGroup(tile, lod) {
     cutMaterial(mat);   // the underground cutaway can discard what lies inside its cut region
     const mesh = new THREE.Mesh(g, mat);
     if (m.variant !== undefined && m.tint !== undefined) {
-      const ca = g.getAttribute('color').array, grey = new Float32Array(m.nv);
-      for (let i = 0; i < m.nv; i++) grey[i] = ca[i * 3];
-      mesh.userData.treeVar = { n: m.nv, grey, variant: new Uint8Array(buf, m.variant, m.nv) };
+      mesh.userData.treeVar = { n: m.nv, grey: pw.grey, variant: new Uint8Array(buf, m.variant, m.nv) };
     }
     if (m.cast && (m.base !== undefined || CFG.underground)) {
       mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -332,7 +355,11 @@ async function loadGroup(tile, lod) {
     group.add(makeImpostors(new Float32Array(buf, lv.cfg.imp.off, lv.cfg.imp.n * 6), lv.cfg.imp.n));
     lv.tris += lv.cfg.imp.n * 2;
   }
-  applyThemeTo(group); paintTreeVariants(group); setThemeColors();
+  await slice();
+  applyThemeTo(group); paintTreeVariants(group);
+  const tc = treeBase();   // only the new impostors need the colour (a full theme refresh per tile would repaint every tile again)
+  for (let i = imp0; i < impostorUniforms.length; i++) impostorUniforms[i].uColor.value.setRGB(tc[0], tc[1], tc[2], THREE.SRGBColorSpace);
+  if (REAL.on || manualSnow > 0) paintSeason();
   root.add(group); lv.obj = group; lv.state = 'ready'; loadedGroups++;
   actEnd(actId);
   setLayers(group);

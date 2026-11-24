@@ -2,7 +2,9 @@
 // Every network request the page makes (through fetch) and every model tile it decodes is listed here while it
 // runs, with a bar for the current batch. The first part of the script, so it also catches the requests made
 // while the rest of the page starts. actStart / actEnd are used by the other parts for work that is not a request.
-const ACT = { items: new Map(), seq: 0, recent: [], total: 0, done: 0, failed: 0, session: 0, drawQueued: false, idleTimer: 0 };
+const ACT = { items: new Map(), seq: 0, recent: [], total: 0, done: 0, failed: 0, session: 0, drawQueued: false, idleTimer: 0,
+  info: null,                      // set later: returns extra lines (queue, workers, data received) for the panel
+  stalls: [], longest: 0 };        // main-thread stalls (long tasks) seen in the last 10 s
 
 function actLabel(url) {
   const u = String(url);
@@ -23,10 +25,17 @@ function actLabel(url) {
 function actStart(label, detail = '') {
   const id = ++ACT.seq;
   ACT.items.set(id, { label, detail, t0: performance.now() });
+  actTick(true);
   ACT.total++; ACT.session++;
   clearTimeout(ACT.idleTimer);
   actDraw();
   return id;
+}
+
+/** Changes what a running item says it is doing now (e.g. "unpacking in worker 2"). */
+function actUpdate(id, detail) {
+  const it = ACT.items.get(id);
+  if (it && it.detail !== detail) { it.detail = detail; actDraw(); }
 }
 
 function actEnd(id, ok = true) {
@@ -54,31 +63,63 @@ function actEnd(id, ok = true) {
   };
 })();
 
+// While anything runs the panel refreshes four times a second, so the spinners' elapsed times and the stats keep moving
+let actTimer = 0;
+function actTick(on) {
+  if (on && !actTimer) actTimer = setInterval(() => { if (ACT.items.size || ACT.stalls.length) actDraw(); else { clearInterval(actTimer); actTimer = 0; actDraw(); } }, 250);
+}
+// Main-thread stalls: a long task is a moment where the page could not react. Shown so a hang is visible, not mysterious.
+try {
+  new PerformanceObserver(list => {
+    const now = performance.now();
+    for (const e of list.getEntries()) { ACT.stalls.push({ t: now, ms: e.duration }); ACT.longest = Math.max(ACT.longest, e.duration); }
+    actTick(true); actDraw();
+  }).observe({ type: 'longtask', buffered: true });
+} catch (e) { /* not supported: the panel simply has no stall line */ }
+
 function actDraw() {
   if (ACT.drawQueued) return;
   ACT.drawQueued = true;
   requestAnimationFrame(() => {
     ACT.drawQueued = false;
     const box = document.getElementById('activity'); if (!box) return;
+    const now = performance.now();
+    while (ACT.stalls.length && now - ACT.stalls[0].t > 10000) ACT.stalls.shift();
     const running = [...ACT.items.values()];
     const title = document.getElementById('actTitle'), count = document.getElementById('actCount');
-    const fill = document.getElementById('actFill'), list = document.getElementById('actList');
+    const fill = document.getElementById('actFill'), list = document.getElementById('actList'), info = document.getElementById('actInfo');
     box.classList.toggle('busy', running.length > 0);
     title.textContent = running.length ? `Loading · ${running.length} running` : (ACT.total ? 'Done' : 'Idle');
     count.textContent = ACT.total ? `${ACT.done}/${ACT.total}${ACT.failed ? ` · ${ACT.failed} failed` : ''}` : `${ACT.session} this session`;
     fill.style.width = ACT.total ? `${Math.round(100 * ACT.done / ACT.total)}%` : '0%';
-    const rows = running.map(it => ({ label: it.label, detail: it.detail, now: true, ms: performance.now() - it.t0 }))
+    // Running items of the same kind (e.g. 40 satellite pictures) are one row: "name x40", newest detail, oldest age
+    const groups = new Map();
+    for (const it of running) {
+      const g = groups.get(it.label) || { label: it.label, n: 0, detail: '', t0: it.t0 };
+      g.n++; g.detail = it.detail; g.t0 = Math.min(g.t0, it.t0); groups.set(it.label, g);
+    }
+    const rows = [...groups.values()].map(g => ({ label: g.n > 1 ? `${g.label} ×${g.n}` : g.label, detail: g.detail, now: true, ms: now - g.t0 }))
       .concat(ACT.recent.map(r => ({ label: r.label, detail: r.detail, now: false, ok: r.ok, ms: r.ms })));
-    list.replaceChildren(...rows.slice(0, 10).map(r => {
+    list.replaceChildren(...rows.slice(0, 9).map(r => {
       const li = document.createElement('li');
       li.className = r.now ? 'now' : (r.ok ? 'ok' : 'bad');
+      const mark = document.createElement('i'); mark.className = r.now ? 'spin' : 'tick'; mark.textContent = r.now ? '' : (r.ok ? '✓' : '✗');
       const name = document.createElement('span'); name.textContent = r.label;
       const det = document.createElement('span'); det.className = 'det'; det.textContent = r.detail || '';
       const ms = document.createElement('span'); ms.className = 'ms';
-      ms.textContent = r.now ? '…' : `${Math.round(r.ms)} ms`;
-      li.append(name, det, ms);
+      ms.textContent = r.now ? `${(r.ms / 1000).toFixed(1)} s` : `${Math.round(r.ms)} ms`;
+      li.append(mark, name, det, ms);
       return li;
     }));
+    // Stats lines: what the loader is doing overall, and whether the page is staying responsive
+    const lines = [];
+    try { if (ACT.info) lines.push(...ACT.info()); } catch (e) { /* the loader is not set up yet */ }
+    if (ACT.stalls.length) {
+      const worst = Math.max(...ACT.stalls.map(x => x.ms));
+      lines.push(`Main thread: ${ACT.stalls.length} stall${ACT.stalls.length > 1 ? 's' : ''} in 10 s, worst ${Math.round(worst)} ms`);
+    } else lines.push('Main thread: responsive');
+    info.replaceChildren(...lines.map(t => { const d = document.createElement('div'); d.textContent = t; return d; }));
+    document.getElementById('actSpin').hidden = !running.length;
   });
 }
 
@@ -86,7 +127,7 @@ function actDraw() {
   const box = document.createElement('div');
   box.id = 'activity';
   box.setAttribute('aria-live', 'polite');
-  box.innerHTML = '<div class="act-head"><span id="actTitle">Idle</span><span id="actCount"></span></div>' +
-    '<div class="act-bar"><div id="actFill"></div></div><ul id="actList"></ul>';
+  box.innerHTML = '<div class="act-head"><span class="act-t"><i id="actSpin" class="spin" hidden></i><span id="actTitle">Idle</span></span><span id="actCount"></span></div>' +
+    '<div class="act-bar"><div id="actFill"></div></div><ul id="actList"></ul><div id="actInfo"></div>';
   document.body.appendChild(box);
 })();

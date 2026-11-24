@@ -10,7 +10,7 @@
 // Hiding eases in quickly and out slowly with a hold-off, so a recovering frame rate does not flip it back and forth.
 // The Quality "Potato" setting forces both axes up. "Culling floor" lets you force a minimum culling by hand.
 const PERF = {
-  START: 55, FULL: 28,
+  START: 42, FULL: 18, AUTO_MAX: 0.7,
   fps: 60, ms: 1000 / 60, worst: 0, peak: 60,
   aggr: 0,                 // 0 = nothing hidden by distance, 1 = the strongest culling
   gfx: 0,                  // 0 = full quality, 1 = lowest resolution, no shadows, no textures
@@ -23,7 +23,7 @@ const PERF = {
   shadowRes: 4096, texScale: 1, lite: false, noTraffic: false, halfTraffic: false,
   // world distance from the camera beyond which each kind of object is hidden (Infinity = not culled)
   cuts: { tile: Infinity, tree: Infinity, markings: Infinity, roads: Infinity, building: Infinity, car: Infinity },
-  _n: 0, _sum: 0, _max: 0, _cpu: 0, _last: null, _lastUp: 0, _fit: [],
+  _n: 0, _sum: 0, _max: 0, _cpu: 0, _last: null, _lastUp: 0, _fit: [], _slow: 0, _readyAt: 0, _idleSince: 0, _ref: null, _noGain: 0, _lockUntil: 0, _lockLen: 45000, futile: false,
   hist: [],                // recent fps samples, for the graph (one per measurement, about every half second)
   stats: { tris: 0, calls: 0, objects: 0, passes: 0 },
   cpuSample(ms) { this._cpu += ms; },
@@ -56,9 +56,9 @@ const PERF = {
     const size = (metres, base, span) => (a > 0 ? metres * px / (base + span * a15) : Infinity);   // distance at which it is thinner than that many pixels
     const m = Math.min;
     this.cuts = { tile: a > 0 ? far * (1 - 0.65 * a) : Infinity,
-      tree: m(cut(0, 1.3), size(14, 0.4, 14)), markings: m(cut(0, 1.6), size(0.8, 0.5, 6)), car: m(cut(0, 1.5), size(2, 0.6, 8)),
+      tree: m(cut(0, 1.0), size(14, 0.4, 3.5)), markings: m(cut(0, 1.6), size(0.8, 0.5, 6)), car: m(cut(0, 1.5), size(2, 0.6, 8)),
       roads: m(cut(0.1, 1.0), size(6, 0.5, 3)), building: m(cut(0.05, 0.9), size(14, 0.5, 5)) };
-    this.treeKeep = a > 0 ? Math.max(0.06, 1 - 1.15 * a) : 1;   // share of trees drawn: thins out long before they disappear
+    this.treeKeep = a > 0 ? Math.max(0.05, 1 - 0.95 * a) : 1;   // share of trees drawn: they thin out first and only vanish near full load
   },
   // The controller: the shortfall against the target frame rate drives both axes; the bottleneck decides which goes further.
   control(now) {
@@ -66,18 +66,36 @@ const PERF = {
     this.potato = q === 'potato';
     const target = Math.min(this.START, this.peak * 0.92);      // a 30 Hz display is not "slow" at 30 fps
     const full = Math.min(this.FULL, target * 0.5);
-    const short = this.on || this.potato ? Math.max(0, Math.min(1, (target - this.fps) / (target - full))) : 0;
+    // Loading a tile or a picture stalls the page for a moment: ignore the first seconds after the model opens, and
+    // only react to slowness that lasts (two readings in a row), so a hitch never makes the trees vanish.
+    if (window.__ready && !this._readyAt) this._readyAt = now;
+    if (typeof ACT !== 'undefined' && ACT.items.size) this._idleSince = now;   // downloads and tile decoding in progress
+    const warm = !this._readyAt || now - this._readyAt < 5000 || now - this._idleSince < 3000;
+    // Culling only makes sense if the frame rate answers to it. If several raises in a row bring no gain, the limit is
+    // elsewhere (the browser, a throttled tab, a software renderer): put everything back and stop trying for a while,
+    // rather than strip the scene for nothing.
+    if (this._ref && now - this._ref.t >= 1200) {
+      this._noGain = this.fps < this._ref.fps * 1.1 ? this._noGain + 1 : 0; this._ref = null;
+      if (this._noGain >= 3 && !this.potato) {
+        this.aggr = this.floor; this.gfx = q === 'low' ? 0.5 : 0; this.applyGfx();
+        this._lockUntil = now + this._lockLen; this._lockLen = Math.min(this._lockLen * 2, 600000);
+        this._noGain = 0; this.futile = true; return;
+      }
+    }
+    if (now > this._lockUntil) this.futile = false;
+    this._slow = this.fps < target ? this._slow + 1 : 0;
+    const short = (this.on || this.potato) && !warm && now > this._lockUntil && this._slow >= 2 ? Math.max(0, Math.min(1, (target - this.fps) / (target - full))) : 0;
     // Probe: a frame time well above the JavaScript time means the GPU is what makes us wait.
     this.bound = this.fps >= target ? 'ok' : (this.cpuMs / this.ms > 0.6 ? 'cpu' : 'gpu');
     const cullK = this.bound === 'gpu' ? 0.9 : 1.4, gfxK = this.bound === 'cpu' ? 0.7 : 1.7;
     let wantA = Math.min(1, short * cullK), wantG = q === 'high' ? 0 : Math.min(1, short * gfxK);
     if (this.potato) { wantG = 1; wantA = Math.max(wantA, 0.6); }
-    wantA = Math.max(wantA, this.floor);
+    wantA = Math.max(Math.min(wantA, this.AUTO_MAX), this.floor);   // automatic culling never empties the scene; the floor slider can
     if (q === 'low') wantG = Math.max(wantG, 0.5);
     const ease = (cur, want) => {
-      if (want > cur) { this._lastUp = now; return cur + (want - cur) * 0.6; }
+      if (want > cur + 0.02) { this._lastUp = now; if (!this._ref) this._ref = { fps: this.fps, t: now }; return cur + (want - cur) * 0.6; }
       // ease back only after a quiet spell, and only while the frame rate has headroom, in small steps
-      if (now - this._lastUp > 6000 && this.fps >= target - 1) return Math.max(want, cur - 0.05);
+      if (now - this._lastUp > 5000 && this.fps >= target * 0.9) return Math.max(want, cur - 0.08);
       return cur;
     };
     this.aggr = ease(this.aggr, wantA); if (this.aggr < 0.01 && wantA === 0) this.aggr = 0;
@@ -166,6 +184,7 @@ const PERF = {
     document.getElementById('perfHud').dataset.band = this.fps >= this.START ? 'good' : (this.fps >= this.FULL + 10 ? 'warn' : 'bad');
     const pct = Math.round(this.aggr * 100);
     document.getElementById('phCull').textContent = !this.on && !this.potato && !this.floor ? 'Culling off'
+      : this.futile ? 'Culling paused · it made no difference, the limit is elsewhere'
       : pct === 0 && this.gfx === 0 ? 'Culling idle · full detail'
       : `Culling ${pct}% · hiding far trees, roads, buildings and cars`;
     const bEl = document.getElementById('phBound');

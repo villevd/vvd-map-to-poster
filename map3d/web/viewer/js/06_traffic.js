@@ -145,26 +145,36 @@ tsp.oninput = showTsp; showTsp();
 
 // load queue: coarsest level of every tile first (instant whole-model coverage), then what the camera needs, nearest first
 const wanted = new Map();
-let pumping = false;
+let activeLoads = 0;
+const LOAD_PARALLEL = Math.max(2, WORK.size);   // as many tiles in flight as there are workers: downloads and unpacking overlap
 function want(tile, lod, prio) {
   const lv = tile.levels[lod]; if (!lv || lv.state !== 'idle') return;
   const k = tile.key + '/' + lod; const cur = wanted.get(k);
   if (!cur || prio < cur.prio) wanted.set(k, { tile, lod, prio });
-  if (!pumping) pump();
+  pump();
 }
-async function pump() {
-  pumping = true;
-  while (wanted.size) {
-    const next = [...wanted.values()].sort((a, b) => a.prio - b.prio)[0];
+function pump() {
+  while (activeLoads < LOAD_PARALLEL && wanted.size) {
+    let next = null;
+    for (const w of wanted.values()) if (!next || w.prio < next.prio) next = w;
     wanted.delete(next.tile.key + '/' + next.lod);
-    try { await loadGroup(next.tile, next.lod); }
-    catch (e) {                                // one bad chunk must not stall the whole queue
-      console.error('chunk failed', next.tile.key, next.lod, e);
-      const lv = next.tile.levels[next.lod]; if (lv) lv.state = 'failed';
-      loadedGroups++;
-    }
-    await new Promise(r => setTimeout(r, 0));
+    activeLoads++;
+    runLoad(next).finally(() => { activeLoads--; setTimeout(pump, 0); });
   }
-  pumping = false;
 }
-
+async function runLoad(next) {
+  try { await loadGroup(next.tile, next.lod); }
+  catch (e) {                                // one bad chunk must not stall the whole queue
+    console.error('chunk failed', next.tile.key, next.lod, e);
+    const lv = next.tile.levels[next.lod];
+    LOAD.errors.push(`tile ${next.tile.key}, detail ${next.lod}: ${e && e.message ? e.message : e}`);
+    if (lv) {
+      if (lv.actId) actEnd(lv.actId, false);
+      lv.attempts = (lv.attempts || 0) + 1;
+      if (lv.attempts < 3) {                 // try again a little later: a dropped connection is common
+        lv.state = 'idle'; LOAD.retries++;
+        setTimeout(() => want(next.tile, next.lod, 0), 1000 * lv.attempts);
+      } else lv.state = 'failed';            // given up: the loading screen says so
+    }
+  }
+}

@@ -39,7 +39,8 @@
   #lsteps li.now { opacity: 1; } #lsteps li.done { opacity: .85; }
   #lsteps li::before { content: '\25CB'; position: absolute; left: 0; }
   #lsteps li.now::before { content: '\25D0'; } #lsteps li.done::before { content: '\2713'; }
-  #lnote { margin-top: 10px; font-size: 12px; opacity: .65; }
+  #lnote { margin-top: 10px; font-size: 12px; opacity: .65; line-height: 1.5; }
+  #lnote .lerr { margin-top: 8px; color: #b3261e; opacity: 1; font-size: 11px; word-break: break-word; }
   #loading.done { opacity: 0; pointer-events: none; }
   #hint { position: fixed; left: 16px; bottom: 8px; font-size: 11px; opacity: .55; }
   #activity { position: fixed; right: 12px; bottom: 30px; width: 300px; z-index: 3; padding: 9px 11px; border-radius: 10px;
@@ -51,7 +52,17 @@
   #activity .act-bar { height: 5px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--text) 15%, transparent); }
   #activity #actFill { height: 100%; width: 0; background: var(--text); transition: width .25s ease; }
   #activity ul { list-style: none; margin: 7px 0 0; padding: 0; max-height: 170px; overflow: hidden; }
-  #activity li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; padding: 1px 0; white-space: nowrap; }
+  #activity li { display: grid; grid-template-columns: 12px auto 1fr auto; gap: 6px; align-items: center; padding: 1px 0; white-space: nowrap; }
+  #activity .act-t { display: inline-flex; align-items: center; gap: 7px; }
+  #activity .spin { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box;
+    border: 2px solid color-mix(in srgb, var(--text) 25%, transparent); border-top-color: var(--text); animation: actSpin .8s linear infinite; }
+  #activity .spin[hidden] { display: none; }
+  #activity .tick { font-style: normal; font-size: 10px; text-align: center; opacity: .7; }
+  #activity li.bad .tick { opacity: 1; }
+  #activity #actInfo { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+    font-size: 10.5px; opacity: .75; font-variant-numeric: tabular-nums; }
+  @keyframes actSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #activity .spin { animation-duration: 2.4s; } }
   #activity li .det { overflow: hidden; text-overflow: ellipsis; opacity: .65; }
   #activity li .ms { opacity: .6; font-variant-numeric: tabular-nums; }
   #activity li.now { font-weight: 600; }

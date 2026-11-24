@@ -46,9 +46,12 @@ renderer.domElement.addEventListener('pointerdown', e => {
   if (e.button !== 2) return;   // right button only; OrbitControls still handles the drag itself
   const p = terrainPointAt(e.clientX, e.clientY);
   if (!p) return;
-  const shift = p.clone().sub(controls.target);
-  controls.target.copy(p);
-  camera.position.add(shift);
+  // The camera stays exactly where it is (so WASD position and zoom survive the click): the pivot goes on the view
+  // centre ray at the depth of the terrain point under the cursor. Nothing jumps, and the orbit radius is the real
+  // distance to the terrain instead of the old orbit distance.
+  const fwd = camera.getWorldDirection(new THREE.Vector3());
+  const depth = Math.max(p.clone().sub(camera.position).dot(fwd), controls.minDistance);
+  controls.target.copy(camera.position).addScaledVector(fwd, depth);
   controls.update();
 });
 

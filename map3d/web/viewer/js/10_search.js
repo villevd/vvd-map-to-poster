@@ -16,7 +16,7 @@ addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
 addEventListener('blur', () => held.clear());
 const KEY_FLOOR_Y = CFG.zrange[0] - 6 * H;
 // WASD speed is a fraction of the height above the ground under the camera, so it slows down near the terrain.
-const KEY_SPEED_PER_HEIGHT = 0.25, KEY_MIN_SPEED = T * 0.01;
+const KEY_SPEED_PER_HEIGHT = 0.25, KEY_MIN_SPEED = Math.max(T * 0.04, 40);   // floor: close to the terrain it must not crawl (about a fast run, scene metres/s)
 const groundRay = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
 // Only the level each nearby tile is showing is tested: hidden levels and far tiles are skipped.
 function groundYBelow(p) {

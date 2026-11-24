@@ -54,10 +54,17 @@ function hideSkeleton(k) {
 async function loadChunk(c) {
   chunkBusy.add(c.k); chunkInflight++; showSkeleton(c);
   try {
-    const r = await fetch('/api/chunk?' + chunkQuery + `&i=${c.i}&j=${c.j}`, { cache: 'no-store' });
+    // The request and the (large) JSON parse both happen in a worker: the page keeps drawing while the server builds it
+    const url = new URL('/api/chunk?' + chunkQuery + `&i=${c.i}&j=${c.j}`, location.href).href;
+    const actId = actStart('Edge chunk (local server)', `cell ${c.i}, ${c.j} · waiting for the server`);
+    let r;
+    try {
+      r = await workRun('json', { url, init: { cache: 'no-store' } }, [], (stage) => actUpdate(actId, `cell ${c.i}, ${c.j} · ${stage}`));
+      actEnd(actId, r.status === 200);
+    } catch (e) { actEnd(actId, false); throw e; }
     if (r.status === 404) throw new TypeError('no chunk route');   // an older GUI process without the route
-    if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    addChunk(c, await r.json());
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}: ${r.text || ''}`);
+    addChunk(c, r.json);
     if (chunkNote) setChunkNote('');
   } catch (e) {
     if (e instanceof TypeError) {            // no server, or no chunk route: stop asking, the model itself keeps working

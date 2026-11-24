@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------- fake plane: lands on the model's runway
 const planeRoot = new THREE.Group();
+const runwayMeshes = [];   // hidden while the model is rendered as a cake (15_cake.js)
 root.add(planeRoot);
 const landBtn = $('landBtn'), followBox = $('followBox');
 let planeUpdate = null;
@@ -48,7 +49,7 @@ function initPlane(ap) {
   stripGeo.setIndex(sidx);
   const runwayMesh = new THREE.Mesh(stripGeo, new THREE.MeshLambertMaterial({ color: 0x3b3f44, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
   runwayMesh.receiveShadow = true;
-  planeRoot.add(runwayMesh);
+  planeRoot.add(runwayMesh); runwayMeshes.push(runwayMesh);
 
   // the plane: nose +X, up +Y, left wing -Z (the same axes as the aircraft library)
   const white = new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.45 });
@@ -149,9 +150,40 @@ const LOAD_STEPS = [
 ];
 const lsteps = $('lsteps');
 LOAD_STEPS.forEach(([t]) => { const li = document.createElement('li'); li.textContent = t; lsteps.appendChild(li); });
-function setLoading(done, total) {
-  const k = done === 0 ? 2 : (done < total ? 3 : 5);
-  [...lsteps.children].forEach((li, i) => { li.className = i < k ? 'done' : i === k ? 'now' : ''; });
-  $('lnote').textContent = LOAD_STEPS[k][1] + (k < 4 ? ` (${done}/${total} chunks ready)` : '');
+// The loading screen: which step we are on, how many tiles are ready, shown, downloading or failed, the data
+// received so far, the time elapsed and the last errors. Refreshed by a timer, so it moves even when frames are not drawn.
+const LOAD_T0 = performance.now();
+const escHtml = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+function loadCounts() {
+  let ready = 0, busy = 0, failed = 0, shown = 0;
+  for (const t of tileList) {
+    if (t.shown >= 0) shown++;
+    for (const lv of Object.values(t.levels)) {
+      if (lv.state === 'ready') ready++; else if (lv.state === 'loading') busy++; else if (lv.state === 'failed') failed++;
+    }
+  }
+  return { ready, busy, failed, shown, tiles: tileList.length, total: CFG.groups.length };
 }
-setLoading(0, CFG.groups.length);
+function setLoading() {
+  const c = loadCounts();
+  const k = c.shown > 0 ? 5 : (c.ready > 0 || c.busy > 0 ? 3 : 2);
+  [...lsteps.children].forEach((li, i) => { li.className = i < k ? 'done' : i === k ? 'now' : ''; });
+  const secs = ((performance.now() - LOAD_T0) / 1000).toFixed(0);
+  let html = `${escHtml(LOAD_STEPS[k][1])}<br>` +
+    `Tiles ready ${c.ready}/${c.total} · on screen ${c.shown}/${c.tiles} · downloading ${c.busy} · failed ${c.failed}<br>` +
+    `Data received ${(LOAD.bytes / 1048576).toFixed(1)} MB · ${LOAD.retries} retries · ${secs} s`;
+  if (LOAD.errors.length) html += `<div class="lerr">${LOAD.errors.slice(-4).map(escHtml).join('<br>')}</div>`;
+  $('lnote').innerHTML = html;
+}
+setLoading();
+const loadTimer = setInterval(() => { if (window.__ready) clearInterval(loadTimer); else setLoading(); }, 500);
+
+// Extra lines in the bottom-right activity panel: what the loader is doing overall
+ACT.info = () => {
+  const c = loadCounts();
+  return [
+    `Tiles: ${c.ready}/${c.total} ready · ${c.busy} loading · ${wanted.size} queued${c.failed ? ` · ${c.failed} failed` : ''}`,
+    WORK.info(),
+    `Data: ${(LOAD.bytes / 1048576).toFixed(1)} MB unpacked · ${LOAD.retries} retries · on screen ${c.shown}/${c.tiles}`,
+  ];
+};

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import zlib
 from pathlib import Path
 from urllib.parse import quote
@@ -252,7 +253,26 @@ def db_page(path: str | Path, name: str) -> str:
     """The built-in viewer for a baked map, served by the GUI: the mesh tiles are fetched from the map's own URL."""
     cfg = bakedmap.read_cfg(path)
     cfg["blobBase"] = f"/maps/{quote(name, safe='')}/blob/"
+    _attach_underground(cfg)
     return render_page(_cfg_json(cfg), "", cfg.get("title", ""), cfg["bg"], cfg.get("text", "#ffffff"))
+
+
+def _attach_underground(cfg: dict) -> None:
+    """Maps baked before the underground view existed get its data when they are opened (cached for a week).
+    Best effort: without data the Underground panel simply stays hidden."""
+    facts, geo = cfg.get("facts") or {}, cfg.get("geo")
+    if "underground" in cfg or not geo or "dem_min_m" not in facts or os.environ.get("MAP3D_NO_UNDERGROUND"):
+        return
+    try:
+        from .geo import LocalFrame
+        from .underground import fetch_underground
+        data = fetch_underground(LocalFrame(geo["lat"], geo["lon"], geo["half"]), os.environ.get("CACHE_DIR", "cache"))
+    except Exception as e:
+        print(f"⚠ Underground data skipped ({e}).")
+        return
+    if data:
+        zmin = (cfg.get("chunks") or {}).get("zmin", facts["dem_min_m"])
+        cfg["underground"] = dict(data, datum={"demMin": float(zmin), "base": float(facts.get("base_m", 0.0))})
 
 
 def render_page(cfg_json: str, blob_tags: str, title: str, bg: str, text: str) -> str:

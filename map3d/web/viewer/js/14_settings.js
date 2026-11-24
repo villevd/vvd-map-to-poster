@@ -54,7 +54,8 @@ function camRestore() {
   } catch (e) {}
   return false;
 }
-if (!camRestore()) horizonView();   // Sky view is the default start view; a camera the user left elsewhere is kept
+camRestore();
+horizonView();   // Sky view is the default on every load (the saved position is kept; only the tilt and low elevation are applied)
 controls.addEventListener('end', camSave);
 
 // Depth precision: the near and far planes follow the camera instead of spanning the whole model all the time.
