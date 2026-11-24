@@ -60,6 +60,8 @@ def parse_request(q: dict) -> tuple[dict, int, int]:
         "exag": _num(q, "exag", 0.01, 20), "bexag": _num(q, "bexag", 0.01, 20),
         "maxLod": _int(q, "maxLod", 0, 2),
     }
+    # optional: pages from before tree heights were separate build trees with the building height
+    spec["texag"] = _num(q, "texag", 0.01, 20) if "texag" in q else spec["bexag"]
     theme = q.get("theme", "")
     if not THEME_RE.fullmatch(theme):
         raise ChunkError("'theme' is required")
@@ -181,7 +183,8 @@ def build_chunk(spec: dict, i: int, j: int, log=print) -> dict:
     levels = (0, 1, 2) if spec["maxLod"] > 0 else (0,)
     meshes = []
     for detail in levels:
-        opts = SceneOptions(exaggeration=spec["exag"], building_exaggeration=spec["bexag"], traffic=False,
+        opts = SceneOptions(exaggeration=spec["exag"], building_exaggeration=spec["bexag"],
+                            tree_exaggeration=spec["texag"], traffic=False,
                             zmin=spec["zmin"], detail=detail, frame_sides=(False, False, False, False),
                             shadows=detail == 0, light_bearing=270.0, light_elevation=40.0)
         sc = build_scene(cell, data, dem, opts, title="", log=lambda *_: None)
@@ -196,7 +199,7 @@ def chunk_payload(spec: dict, i: int, j: int, log=print) -> dict:
 
     key = "chunk3d_" + cmp._cache_digest(
         cmp._map3d_stamp(), round(spec["lat"], 6), round(spec["lon"], 6), spec["half"], spec["tiles"],
-        spec["tileHalf"], i, j, round(spec["zmin"], 3), spec["exag"], spec["bexag"], spec["maxLod"], spec["theme"])
+        spec["tileHalf"], i, j, round(spec["zmin"], 3), spec["exag"], spec["bexag"], spec["texag"], spec["maxLod"], spec["theme"])
     hit = cmp._cache_try_get(key)
     if hit is not None:
         return hit

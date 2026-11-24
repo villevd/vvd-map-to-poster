@@ -56,9 +56,30 @@
   #activity li .ms { opacity: .6; font-variant-numeric: tabular-nums; }
   #activity li.now { font-weight: 600; }
   #activity li.bad { color: #c0392b; }
+  #perfHud { position: fixed; top: 16px; right: 16px; z-index: 3; min-width: 170px; padding: 9px 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid color-mix(in srgb, var(--text) 22%, transparent); font: 12px/1.35 system-ui, sans-serif; }
+  #perfHud .ph-main { display: flex; align-items: baseline; gap: 5px; font-variant-numeric: tabular-nums; }
+  #perfHud #phFps { font-size: 26px; font-weight: 700; line-height: 1; min-width: 2.2em; text-align: right; }
+  #perfHud #phMs { font-size: 16px; font-weight: 600; min-width: 3.2em; text-align: right; margin-left: 10px; }
+  #perfHud .ph-unit { font-size: 11px; opacity: .65; letter-spacing: .06em; text-transform: uppercase; }
+  #perfHud[data-band=good] #phFps { color: #2ecc71; }
+  #perfHud[data-band=warn] #phFps { color: #f1c40f; }
+  #perfHud[data-band=bad] #phFps { color: #e74c3c; }
+  #perfHud .ph-cull { margin-top: 5px; font-size: 11px; opacity: .75; max-width: 220px; }
+  #perfHud .ph-toggle { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; cursor: pointer; }
+  #perfHud .ph-toggle input { accent-color: var(--text); }
+  #perfHud #phGraph { display: block; width: 100%; height: 80px; margin-top: 8px; border-radius: 6px;
+    background: color-mix(in srgb, var(--text) 6%, transparent); }
+  #perfHud .ph-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px; margin-top: 6px; font-size: 11px; }
+  #perfHud .ph-stats div { display: flex; justify-content: space-between; }
+  #perfHud .ph-stats span { opacity: .65; }
+  #perfHud .ph-stats b { font-variant-numeric: tabular-nums; font-weight: 600; }
   @media (max-width: 640px) {
     #ui { width: auto; right: 12px; left: 12px; top: auto; bottom: 12px; padding: 10px 12px; max-height: 45vh; }
     #ui .sub, #hint, #credits, #activity { display: none; }
+    #perfHud { top: 10px; right: 10px; min-width: 0; padding: 6px 9px; }
+    #perfHud .ph-cull { display: none; }
   }
   #colorsBox { margin: 8px 0 2px; font-size: 12px; }
   #colorsBox summary { cursor: pointer; opacity: .85; margin-bottom: 4px; }

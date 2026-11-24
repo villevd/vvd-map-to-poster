@@ -7,6 +7,11 @@ function timeAgo(ts) {
   if (s < 30 * 86400) return `${Math.floor(s / 86400)} d ago`;
   return new Date(ts * 1000).toLocaleDateString();
 }
+// A model is either a baked map (.db, opened by the built-in viewer) or a standalone page (.html, from before)
+const viewUrl = file => (file.endsWith('.db') ? '/maps/' + encodeURIComponent(file) : '/files/' + encodeURIComponent(file));
+const assetUrl = (file, ext) => (file.endsWith('.db')
+  ? '/maps/' + encodeURIComponent(file) + '/asset/' + ext
+  : '/files/' + encodeURIComponent(file.replace(/\.html$/, '.' + ext)));
 function openModel(file) {
   selected = file;
   store.set('map3d-open', file);            // reopened after a reload
@@ -15,7 +20,7 @@ function openModel(file) {
   refreshLabels(); updateGo();
   const m = modelMeta[file] || {};
   $('#modelNow').textContent = m.city ? `${m.city} · ${m.theme}` : 'Model open';
-  $('#empty').hidden = true; const v = $('#view'); v.hidden = false; v.src = '/files/' + encodeURIComponent(file);
+  $('#empty').hidden = true; const v = $('#view'); v.hidden = false; v.src = viewUrl(file) + '?v=' + fileVer(file);
   $('#previewMount').innerHTML = '<p class="none">Loading this model’s live controls…</p>';
   $('#insights').innerHTML = '<p class="none">Reading this model…</p>';
   v.onload = () => { v.contentWindow.focus(); mountPreviewPanel(v); lastCfg = readCfg(v); renderInsights(); };
@@ -92,8 +97,8 @@ function renderLibrary() {
     const li = document.createElement('li');
     li.className = 'm' + (m.file === selected ? ' sel' : ''); li.dataset.file = m.file;
     li.tabIndex = 0; li.setAttribute('role', 'button'); li.setAttribute('aria-label', `Open ${m.city}`);
-    const png = m.extras.includes('png') ? m.file.replace(/\.html$/, '.png') : null;
-    li.innerHTML = `${png ? `<img class="thumb" loading="lazy" alt="" src="/files/${encodeURIComponent(png)}">` : '<div class="thumb ph" aria-hidden="true">◈</div>'}
+    const png = m.extras.includes('png');
+    li.innerHTML = `${png ? `<img class="thumb" loading="lazy" alt="" src="${assetUrl(m.file, 'png')}?v=${fileVer(m.file)}">` : '<div class="thumb ph" aria-hidden="true">◈</div>'}
       <div class="mbody"><b></b><span class="meta"></span><div class="links"></div></div>`;
     li.querySelector('b').textContent = m.city;
     li.querySelector('.meta').textContent = `${m.theme} · ${timeAgo(m.mtime)} · ${m.size_mb} MB`;
@@ -103,8 +108,9 @@ function renderLibrary() {
       if (dl) e.download = '';
       e.onclick = ev => ev.stopPropagation(); e.onkeydown = ev => ev.stopPropagation(); links.appendChild(e);
     };
-    a('/files/' + encodeURIComponent(m.file), 'Open in tab ↗');
-    for (const ext of m.extras) a('/files/' + encodeURIComponent(m.file.replace(/\.html$/, '.' + ext)), ext.toUpperCase(), ext !== 'png');
+    a(viewUrl(m.file), 'Open in tab ↗');
+    if (m.file.endsWith('.db')) a('/files/' + encodeURIComponent(m.file), 'Baked map', true);
+    for (const ext of m.extras) a(assetUrl(m.file, ext), ext.toUpperCase(), ext !== 'png');
     li.onclick = () => openModel(m.file);
     li.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModel(m.file); } };
     ul.appendChild(li);
@@ -121,4 +127,36 @@ async function loadModels(openFirst) {
   if (openFirst && !selected) openModel(first); else openModel(selected || first);
 }
 $('#libSearch').addEventListener('input', renderLibrary);
+
+// ---- hot reload of the exported files (posters/: html, png, glb, stl) --------------------------------
+// The server lists every exported file with its time and size. When one changes (rebuilt, copied in, deleted),
+// the library refreshes by itself and the open model reloads if one of its own files changed.
+let postersFiles = null;                     // name -> [mtime ms, size]
+const fileVer = name => (postersFiles && postersFiles[name] ? postersFiles[name][0] : 0);
+async function refreshLibrary() {
+  const models = await api('/api/models');
+  lastModels = models;
+  for (const m of models) { modelTheme[m.file] = m.theme; modelMeta[m.file] = m; }
+  renderLibrary();
+  if (!models.length) { if (!selected) renderInsights(); return; }
+  if (!selected) openModel(models[0].file);
+}
+async function watchPosters() {
+  if (document.hidden) return;
+  let files;
+  try { files = (await api('/api/posters-stamp')).files; } catch (e) { return; }
+  const sig = JSON.stringify(files);
+  if (postersFiles === null) { postersFiles = files; postersSig = sig; return; }
+  if (sig === postersSig) return;
+  const prev = postersFiles;
+  postersFiles = files; postersSig = sig;
+  const changed = Object.keys({ ...prev, ...files }).filter(k => JSON.stringify(prev[k]) !== JSON.stringify(files[k]));
+  await refreshLibrary();
+  if (selected) {
+    const base = selected.replace(/\.(html|db)$/, '.');
+    if (changed.some(k => k === selected || k.startsWith(base))) openModel(selected);
+  }
+}
+let postersSig = null;
+setInterval(() => { watchPosters().catch(() => {}); }, 1500);
 

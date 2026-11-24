@@ -2,7 +2,7 @@
 let qualityScale = 1, ratio = dpr, lastFpsT = performance.now(), frames = 0, fps = 60;
 function lodFor(d) {
   if (maxLod === 0) return 0;
-  const s = T * qualityScale;
+  const s = T * qualityScale * (1 - 0.85 * PERF.aggr);   // under load, detailed models stop much sooner (the coarse level takes over)
   return d < 3.5 * s ? 0 : (d < 7 * s ? Math.min(1, maxLod) : maxLod);
 }
 function nearestReady(tile, wantLod) {
@@ -12,29 +12,38 @@ function nearestReady(tile, wantLod) {
   for (const [, l] of order) if (tile.levels[l] && tile.levels[l].state === 'ready') return l;
   return -1;
 }
-const cam = new THREE.Vector3();
+const cam = new THREE.Vector3(), _cellPos = new THREE.Vector3();
 function updateTiles() {
   cam.copy(camera.position);
   const far = +dd.value * T;
-  const wantShadow = shadowsOn.checked && quality.value !== 'low';
+  const cuts = PERF.cuts;      // dynamic culling: distances beyond which each kind of object is hidden (Infinity = off)
+  const wantShadow = shadowsOn.checked && quality.value !== 'low' && !PERF.potato && PERF.shadowRes > 0;
   for (const t of tileList) {
     const d = cam.distanceTo(t.center);
     if (controls.target.distanceTo(t.center) < 1.2 * T) t.explored = true;
     // Hidden tiles (past the draw distance, or unexplored under the fog of war) cost nothing: they are not even loaded
-    const hidden = (fogOn.checked && d > far * 1.15) || (fowOn.checked && !t.explored);
+    const hidden = (fogOn.checked && d > far * 1.15) || (fowOn.checked && !t.explored) || d > cuts.tile;
     const wantLod = lodFor(d);
     if (!hidden) {
       want(t, maxLod, 0);
       if (wantLod !== maxLod) want(t, wantLod, 1 + d / T);
     }
     const show = hidden ? -1 : nearestReady(t, wantLod);
-    if (!hidden && imgOn.sat && d < 2 * T) upgradeSat(t);     // zoomed in: sharper ground picture for this tile
+    if (!hidden && imgOn.sat && d < 2 * T && PERF.texScale === 1) upgradeSat(t);     // zoomed in: sharper ground picture for this tile
     for (const [l, lv] of Object.entries(t.levels)) if (lv.obj) lv.obj.visible = (+l === show);
     t.shown = show;
     t.placeholder.visible = fowOn.checked && !t.explored;
     if (show >= 0) {
       const casts = wantShadow && show === 0 && d < 2.2 * T;
-      t.levels[show].obj.traverse(o => {
+      // far trees, roads, markings and buildings are hidden under load (layer checkboxes still apply)
+      const gHide = { tree: d > cuts.tree, markings: d > cuts.markings, roads: d > cuts.roads, building: d > cuts.building };
+      const lvObj = t.levels[show].obj;
+      lvObj.traverse(o => {
+        const g = o.userData.group;
+        if (o.userData.cellC) {   // tree cell: culled by its own distance, not the tile's
+          _cellPos.copy(o.userData.cellC).add(lvObj.position);
+          o.visible = layers.tree && (cuts.tree === Infinity || cam.distanceTo(_cellPos) <= cuts.tree);
+        } else if (g && g in layers) o.visible = layers[g] && !gHide[g];
         if (o.isMesh && !o.userData.impostor) { o.castShadow = casts && o.userData.cast; o.receiveShadow = wantShadow && o.userData.receive && show === 0; }
       });
     }
@@ -43,8 +52,9 @@ function updateTiles() {
   requestChunks();
 }
 quality.onchange = () => {
-  qualityScale = { auto: 1, high: 1.8, low: 0.5 }[quality.value];
-  ratio = quality.value === 'low' ? Math.min(dpr, 0.75) : dpr; renderer.setPixelRatio(ratio); renderer.setSize(innerWidth, innerHeight);
+  qualityScale = { auto: 1, high: 1.8, low: 0.5, potato: 0.3 }[quality.value];
+  // resolution, shadows and textures follow from PERF.gfx; give the controller a clean start at the new setting
+  PERF.gfx = quality.value === 'potato' ? 1 : (quality.value === 'low' ? 0.5 : 0); PERF.applyGfx();
 };
 shadowsOn.onchange = updateTiles;
 

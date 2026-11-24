@@ -36,6 +36,34 @@ def road_polygons(lines_by_class: dict[str, np.ndarray], scale: float, tile: Bas
     return out
 
 
+def constrained_triangles(parts: np.ndarray) -> np.ndarray:
+    """
+    Constrained Delaunay triangulation of polygons. GEOS rejects some polygons
+    (self-touching or degenerate rings, typically from clipped marking strokes)
+    with "Unable to find a convex corner"; those are repaired with make_valid
+    and triangulated one by one, and only pieces that still fail are dropped.
+    """
+    try:
+        return shapely.constrained_delaunay_triangles(parts)
+    except shapely.errors.GEOSException:
+        pass
+    tris: list = []
+    for p in parts:
+        try:
+            tris.append(shapely.constrained_delaunay_triangles(p))
+            continue
+        except shapely.errors.GEOSException:
+            pass
+        for q in shapely.get_parts(shapely.get_parts(shapely.make_valid(p))):
+            if q.geom_type != "Polygon" or q.area <= 0.5:
+                continue
+            try:
+                tris.append(shapely.constrained_delaunay_triangles(q))
+            except shapely.errors.GEOSException:
+                continue
+    return np.asarray(tris, dtype=object)
+
+
 def drape_polygons(polys: np.ndarray, step: float, zfunc: ZFunc, lift: float):
     """
     Triangulate polygons and drape them on the terrain (vertices sampled from
@@ -49,7 +77,7 @@ def drape_polygons(polys: np.ndarray, step: float, zfunc: ZFunc, lift: float):
     if not len(parts):
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int32)
     parts = shapely.segmentize(parts, step)
-    tris = shapely.constrained_delaunay_triangles(parts)
+    tris = constrained_triangles(parts)
     tp = shapely.get_parts(tris)
     if not len(tp):
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int32)
@@ -103,7 +131,7 @@ def bridge_meshes(lines: np.ndarray, widths: np.ndarray, step: float, zfunc: ZFu
             ease = u * u * (3.0 - 2.0 * u)
             return _za + (_zb - _za) * (s / _len) + _c * ease + lift
 
-        tris = shapely.constrained_delaunay_triangles(poly)
+        tris = constrained_triangles(np.asarray([poly], dtype=object))
         tp = shapely.get_parts(tris)
         if not len(tp):
             continue

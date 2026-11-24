@@ -10,10 +10,14 @@ $('t').textContent = CFG.title || '3D city';
 $('s').textContent = CFG.subtitle || '';
 $('credits').textContent = CFG.credits || '';
 
-async function inflate(b64) {
-  // Decode base64 directly (fetching a huge data: URL can stall or fail in some browsers / frames)
-  const bin = atob(b64), bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+async function inflate(src) {
+  // src: base64 text (standalone pages, chunks) or the raw compressed bytes (baked maps, fetched from the server)
+  let bytes;
+  if (typeof src === 'string') {
+    // Decode base64 directly (fetching a huge data: URL can stall or fail in some browsers / frames)
+    const bin = atob(src); bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } else bytes = new Uint8Array(src);
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
   return await new Response(stream).arrayBuffer();
 }

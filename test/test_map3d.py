@@ -250,14 +250,14 @@ class GuiValidation(unittest.TestCase):
         self.assertIn("--city=--help", cmd)
         self.assertIn("--country=-d 1", cmd)
         self.assertIn("--3d", cmd)
-        self.assertIn("--3d-outputs=html", cmd)          # the viewer is always produced
+        self.assertIn("--3d-outputs=db", cmd)            # the baked map is always produced
 
     def test_layers_and_outputs(self):
         cmd = self.cmd(trees=False, overture=False, outputs=["glb", "bogus", "stl"])
         self.assertIn("--no-trees", cmd)
         self.assertIn("--no-overture", cmd)
         self.assertNotIn("--no-buildings", cmd)
-        self.assertIn("--3d-outputs=html,glb,stl", cmd)
+        self.assertIn("--3d-outputs=db,glb,stl", cmd)
 
     def test_terrain_and_building_exaggeration_are_separate_flags(self):
         cmd = self.cmd(exaggeration=1.2, building_exaggeration=2.5)

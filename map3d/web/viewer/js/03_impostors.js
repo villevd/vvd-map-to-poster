@@ -43,7 +43,7 @@ function makeImpostors(arr, n) {
   geo.setAttribute('iTint', new THREE.InterleavedBufferAttribute(ib, 1, 5));
   geo.instanceCount = n;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTex: { value: treeTex }, uColor: { value: new THREE.Color() } }]);
-  uniforms.uBF = heightU.uBF;
+  uniforms.uBF = heightU.uTF;   // far trees follow the tree height, not the building height
   impostorUniforms.push(uniforms);
   const mat = new THREE.ShaderMaterial({
     uniforms, fog: true, side: THREE.DoubleSide,

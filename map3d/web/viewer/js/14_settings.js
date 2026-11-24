@@ -2,7 +2,7 @@
 // Layers, imagery, exaggeration, sun, fog and quality come back as they were left. The theme is not stored here:
 // the GUI chooses it per model.
 const VIEW_KEY = 'map3d-view';
-const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality'];
+const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'texag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality', 'cullOn'];
 const VIEW_GROUPS = ['building', 'tree', 'roads', 'markings', 'traffic'];
 const groupBox = g => document.querySelector(`input[data-group="${g}"]`) || (PARENT_DOC && PARENT_DOC.querySelector(`input[data-group="${g}"]`));
 let viewRestoring = false;
@@ -76,11 +76,14 @@ renderer.setAnimationLoop(now => {
   if (planeUpdate) planeUpdate(dtReal);
   keyMove(dt);
   controls.update();
+  if (skyDir) camera.lookAt(camera.position.x + skyDir.x, camera.position.y + skyDir.y, camera.position.z + skyDir.z);
   fitClip();
   PRECIP.update(now);
+  PERF.frame(now);
   if (tick++ % 6 === 0) updateTiles();
   adapt(now);
   stepRealistic(now);
+  cakeUpdate(now);
   placeSearch.update(now);
   renderer.render(scene, camera);
   if (!window.__ready && tileList.some(t => t.shown >= 0)) {

@@ -38,6 +38,7 @@ def build_scene_3d(
     use_overture=True,
     include_traffic=True,
     tiles=1,
+    include_underground=True,
 ):
     """
     Build the 3D scene, or load the identical one built earlier.
@@ -50,7 +51,7 @@ def build_scene_3d(
     options = dict(exaggeration=exaggeration, azimuth=azimuth, building_exaggeration=building_exaggeration,
                    include_buildings=include_buildings, include_trees=include_trees, include_railways=include_railways,
                    include_terrain=include_terrain, use_overture=use_overture, include_traffic=include_traffic,
-                   tiles=tiles)
+                   tiles=tiles, include_underground=include_underground)
     key = "scene3d_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(dist), city,
                                       sorted(options.items(), key=lambda kv: kv[0]))
     scene = _cache_try_get(key)
@@ -77,6 +78,7 @@ def _build_scene_3d_impl(
     use_overture=True,
     include_traffic=True,
     tiles=1,
+    include_underground=True,
 ):
     """
     Fetch every available data source around ``point`` and build the 3D scene.
@@ -185,8 +187,21 @@ def _build_scene_3d_impl(
         light_elevation=40.0,
     )
     if tiles > 1:
-        return build_tiled_scene(frame, data, dem, options, tiles, title=city)
-    return build_scene(frame, data, dem, options, title=city)
+        scene = build_tiled_scene(frame, data, dem, options, tiles, title=city)
+    else:
+        scene = build_scene(frame, data, dem, options, title=city)
+    if include_underground:
+        # Geology, mines, drill holes and claims for the cutaway view. Optional: any failure just leaves it out
+        from map3d.underground import fetch_underground
+        print("Step 3/3 - Fetching what is underground (geology, mines, drill holes, claims)...")
+        try:
+            ug = fetch_underground(frame, CACHE_DIR_PATH, osm_features=osm_features)
+        except Exception as e:
+            print(f"⚠ Underground data skipped ({e}).")
+            ug = None
+        if ug:
+            scene.info["underground"] = ug
+    return scene
 
 
 def _all_themes():
@@ -235,7 +250,7 @@ def create_poster_3d(
     from map3d.export import export_glb, export_stl
     from map3d.render import Camera, render_scene
     from map3d.scene import credits_text
-    from map3d.viewer import export_html
+    from map3d.viewer import export_db, export_html
 
     display_city = display_city or city
     display_country = display_country or country
@@ -266,6 +281,21 @@ def create_poster_3d(
         written.append(str(export_glb(scene, THEME, base + ".glb", credits=credits)))
     if "stl" in outputs:
         written.append(str(export_stl(scene, base + ".stl", size_mm=print_size)))
+    if "db" in outputs:
+        # The baked map: the viewer's data plus the exports made above, in one file the GUI opens directly
+        print("Writing the baked map (.db): viewer data, every theme and the exports in one file...")
+        assets = {}
+        if "poster" in outputs and output_format.lower() == "png":
+            assets["png"] = output_file
+        if "glb" in outputs:
+            assets["glb"] = base + ".glb"
+        if "stl" in outputs:
+            assets["stl"] = base + ".stl"
+        written.append(str(export_db(
+            scene, THEME, base + ".db", title=display_city, subtitle=display_country,
+            azimuth=azimuth, elevation=elevation, credits=credits,
+            themes=_all_themes(), theme_id=theme_name, assets=assets,
+        )))
 
     for path in written:
         print(f"✓ Saved {path} ({os.path.getsize(path) / 1_048_576:.1f} MB)")

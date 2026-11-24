@@ -15,6 +15,37 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
 addEventListener('blur', () => held.clear());
 const KEY_FLOOR_Y = CFG.zrange[0] - 6 * H;
+// WASD speed is a fraction of the height above the ground under the camera, so it slows down near the terrain.
+const KEY_SPEED_PER_HEIGHT = 0.25, KEY_MIN_SPEED = T * 0.01;
+const groundRay = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0);
+// Only the level each nearby tile is showing is tested: hidden levels and far tiles are skipped.
+function groundYBelow(p) {
+  groundRay.set(p, DOWN);
+  let best = null;
+  for (const t of tileList) {
+    const lv = t.shown >= 0 ? t.levels[t.shown] : null;
+    if (!lv || !lv.obj) continue;
+    if (Math.abs(t.center.x - p.x) > 0.5 * T || Math.abs(t.center.z - p.z) > 0.5 * T) continue;   // only the tile under the camera
+    if (!lv.groundMeshes) {   // ground meshes only: ray-testing every building and tree mesh is what made WASD stutter
+      lv.groundMeshes = [];
+      lv.obj.traverse(o => { if (o.isMesh && PIVOT_ROLES.has(o.userData.role)) lv.groundMeshes.push(o); });
+    }
+    for (const m of lv.groundMeshes) {
+      if (!m.visible) continue;
+      for (const h of groundRay.intersectObject(m, false)) if (best === null || h.point.y > best) best = h.point.y;
+    }
+  }
+  return best;
+}
+// The ground height is re-measured at most every 150 ms or after the camera has moved a little; it changes slowly.
+let groundProbe = { y: null, t: -Infinity, x: 0, z: 0 };
+function groundCached(p) {
+  const now = performance.now();
+  const moved = Math.hypot(p.x - groundProbe.x, p.z - groundProbe.z);
+  if (now - groundProbe.t < 400 && moved < 0.05 * T) return groundProbe.y;
+  groundProbe = { y: groundYBelow(p), t: now, x: p.x, z: p.z };
+  return groundProbe.y;
+}
 function keyMove(dt) {
   if (!held.size) return;
   camera.getWorldDirection(fwd); fwd.y = 0;
@@ -28,7 +59,9 @@ function keyMove(dt) {
   if (held.has('e')) mv.y += 1;
   if (held.has('q')) mv.y -= 1;
   if (mv.lengthSq() === 0) return;
-  const speed = Math.max(controls.getDistance() * 0.8, T * 0.03) * (shiftDown ? 3 : 1);
+  const g = groundCached(camera.position);
+  const above = g === null ? controls.getDistance() : camera.position.y - g;   // no ground under the camera: use the orbit distance
+  const speed = Math.max(above * KEY_SPEED_PER_HEIGHT, KEY_MIN_SPEED) * (shiftDown ? 3 : 1);
   mv.normalize().multiplyScalar(speed * dt);
   // Q goes well below the model's lowest ground (six half-widths down), not just to the datum at height 0
   if (controls.target.y + mv.y < KEY_FLOOR_Y && mv.y < 0) mv.y = Math.max(mv.y, KEY_FLOOR_Y - controls.target.y);

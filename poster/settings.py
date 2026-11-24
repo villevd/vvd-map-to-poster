@@ -17,7 +17,7 @@ FILE_ENCODING = "utf-8"
 
 DEFAULT_DISTANCE_2D = 18000
 DEFAULT_DISTANCE_3D = 1500          # a 3D model is about buildings, so it covers a much smaller area
-THREE_D_OUTPUTS = ("poster", "html", "glb", "stl")
+THREE_D_OUTPUTS = ("poster", "db", "html", "glb", "stl")
 
 
 # Public Overpass servers to try, in order, when the main one does not answer

@@ -19,8 +19,8 @@ function setStatus(text, cls) { status.textContent = text; status.className = cl
 
 function paramsFromForm() {
   const v = n => f.elements[n];
-  const outputs = ['html'];
-  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl']]) if (v(box).checked) outputs.push(name);
+  const outputs = ['db'];                    // the baked map is always written: it is what the GUI opens
+  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl'], ['o_html', 'html']]) if (v(box).checked) outputs.push(name);
   // Heights, buildings and trees are live controls in the viewer, so the build always bakes the neutral defaults.
   return { city: v('city').value, country: v('country').value, theme: v('theme').value, distance: +v('distance').value, tiles: +v('tiles').value,
     exaggeration: 1.5, building_exaggeration: 1.5, buildings: true, trees: true,
@@ -53,7 +53,7 @@ function loadFormFrom(p) {
   for (const k of ['city', 'country', 'latitude', 'longitude']) if (p[k] !== undefined) v(k).value = p[k];
   for (const k of ['distance', 'tiles']) if (p[k] !== undefined) v(k).value = p[k];
   for (const k of ['terrain', 'overture']) if (p[k] !== undefined) v(k).checked = p[k];
-  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl']]) v(box).checked = (p.outputs || []).includes(name);
+  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl'], ['o_html', 'html']]) v(box).checked = (p.outputs || []).includes(name);
   if (p.theme && [...v('theme').options].some(o => o.value === p.theme)) v('theme').value = p.theme;
 }
 function saveForm() { store.set('map3d-gui', paramsFromForm()); }
@@ -63,6 +63,6 @@ function restoreForm() {
   for (const k of ['city', 'country', 'theme', 'latitude', 'longitude']) if (p[k] !== undefined && v(k)) v(k).value = p[k];
   for (const k of ['distance', 'tiles']) if (p[k] !== undefined) v(k).value = p[k];
   for (const k of ['terrain', 'overture']) if (p[k] !== undefined) v(k).checked = p[k];
-  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl']]) v(box).checked = (p.outputs || []).includes(name);
+  for (const [box, name] of [['o_poster', 'poster'], ['o_glb', 'glb'], ['o_stl', 'stl'], ['o_html', 'html']]) v(box).checked = (p.outputs || []).includes(name);
 }
 

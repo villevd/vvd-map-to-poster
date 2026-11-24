@@ -16,8 +16,9 @@ function setThemeColors() {
   const c = treeBase();
   impostorUniforms.forEach(u => u.uColor.value.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace));
   const bg = new THREE.Color().setStyle(theme.bg, THREE.SRGBColorSpace);
-  if (!REAL.on) { scene.background = bg; if (scene.fog) scene.fog.color.copy(bg); }   // the realistic sky takes over otherwise
+  if (!REAL.on) { scene.background = skyTex || bg; if (scene.fog) scene.fog.color.copy(bg); }   // the realistic sky takes over otherwise
   placeholderMat.color.setStyle(theme.text, THREE.SRGBColorSpace);
+  updateWaterEnv();
   document.documentElement.style.setProperty('--bg', theme.bg);
   document.documentElement.style.setProperty('--text', theme.text);
   paintTreeVariants(root);
@@ -31,7 +32,11 @@ const COLOUR_ROLES = [['ground', 'Ground'], ['water', 'Water'], ['park', 'Parks'
   ['road_secondary', 'Secondary roads'], ['road_tertiary', 'Tertiary roads'], ['road_residential', 'Small roads'],
   ['rail', 'Railways'], ['bridge', 'Bridges']];
 const colourOv = {};
-function colorOf(role) { return colourOv[role] || (theme.colors[role]); }
+function colorOf(role) {
+  if (colourOv[role]) return colourOv[role];
+  if (role === 'water') return lakeTint(theme.colors.water);   // lakes: a clear blue-teal, still lighter or darker with the theme
+  return theme.colors[role];
+}
 const hexOf = c => '#' + c.slice(0, 3).map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
 const rgbOf = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
 function syncPickers() {

@@ -6,7 +6,7 @@ const CHUNK_KEEP = 3, CHUNK_RETRY_MS = 20000;
 const chunkFailed = new Map(), chunkBusy = new Set();
 let chunkInflight = 0, chunkOff = !CH, chunkNote = '';
 const chunkQuery = CH && new URLSearchParams({ lat: CH.lat, lon: CH.lon, half: CH.half, tiles: CH.tiles, tileHalf: CH.tileHalf,
-  zmin: CH.zmin, exag: CH.exag, bexag: CH.bexag, maxLod: CH.maxLod, theme: CH.theme });
+  zmin: CH.zmin, exag: CH.exag, bexag: CH.bexag, texag: CH.texag, maxLod: CH.maxLod, theme: CH.theme });
 const HINT_TEXT = $('hint').textContent;
 function setChunkNote(msg) { chunkNote = msg; $('hint').textContent = msg ? msg : HINT_TEXT; }
 if (CH && !/^https?:$/.test(location.protocol)) { chunkOff = true; setChunkNote('Edge chunks only work when this page is opened from the GUI: run python -m map3d.gui and open the model there.'); }
@@ -99,10 +99,7 @@ function adapt(now) {
   if (now - lastFpsT < 1000) return;
   fps = frames * 1000 / (now - lastFpsT); frames = 0; lastFpsT = now;
   PRECIP.tick(fps);
-  if (quality.value === 'auto') {            // adaptive resolution: trade sharpness for smoothness, and back
-    const next = fps < 26 ? Math.max(0.6, ratio - 0.2) : (fps > 56 ? Math.min(dpr, ratio + 0.1) : ratio);
-    if (Math.abs(next - ratio) > 1e-3) { ratio = next; renderer.setPixelRatio(ratio); renderer.setSize(innerWidth, innerHeight); }
-  }
+  // (render resolution is adapted by PERF.applyGfx, together with shadows and textures)
   const info = renderer.info.render;
   $('stats').textContent = `${fps.toFixed(0)} fps · ${(info.triangles / 1000).toFixed(0)}k tris · ${info.calls} calls\n` +
     `res ${(ratio * 100).toFixed(0)}% · ${loadedGroups}/${CFG.groups.length} chunks · ${tileList.filter(t => t.shown >= 0).length}/${tileList.length} tiles`;
@@ -122,5 +119,5 @@ $('shot').onclick = () => {
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
 });
-$('exag').value = EX.t; $('bexag').value = EX.b; applyExaggeration();
+$('exag').value = EX.t; $('bexag').value = EX.b; $('texag').value = EX.r; applyExaggeration();
 

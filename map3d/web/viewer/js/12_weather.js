@@ -341,6 +341,7 @@ function applyRealistic() {
   $('az').value = ((sunAz % 360) + 360) % 360; $('el').value = Math.max(8, sunEl);
   const sky = new THREE.Color().copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_CLOUD, cloud * 0.8 * day).lerp(SKY_DUSK, 0.75 * dusk);
   scene.background = sky;
+  updateWaterEnv();
   const far = (+dd.value) * T * (1 - 0.7 * fogAmt);
   scene.fog = new THREE.Fog(sky, far * 0.55, far);
 

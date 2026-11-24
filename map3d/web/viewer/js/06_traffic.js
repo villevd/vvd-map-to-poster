@@ -65,6 +65,7 @@ if (CFG.traffic && CFG.traffic.edges.length) {
   const lightShown = new Array(ap.length).fill('');
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qp = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
   const carScale = new THREE.Vector3(1, 1, 1);   // per car, set each frame from the terrain exaggeration
+  const noCarScale = new THREE.Vector3(0, 0, 0); // a culled car is drawn at no size
   const up = new THREE.Vector3(0, 1, 0), zAxis = new THREE.Vector3(0, 0, 1), off = new THREE.Vector3();
   ap.forEach((a, i) => { m4.compose(p.set(a.x, a.y + L * 1.3, a.z), q.identity(), one); lights.setMatrixAt(i, m4); });
   lights.instanceMatrix.needsUpdate = true;
@@ -79,6 +80,7 @@ if (CFG.traffic && CFG.traffic.edges.length) {
     // vertical scale is the inverse, so the stretch cancels out while their positions still follow the ground.
     carScale.set(1, 1 / root.scale.y, 1);
     const k = 1 - Math.exp(-Math.min(dt, 0.1) * 12);
+    const carCut = PERF.cuts.car, camX = camera.position.x, camZ = camera.position.z;   // dynamic culling: far cars shrink to nothing
     sim.cars.forEach((car, i) => {
       const kind = kinds[car.type], len = car.len, W = kind.W;
       const f = sim.pose(car);                                   // the sim tracks the front bumper
@@ -102,15 +104,17 @@ if (CFG.traffic && CFG.traffic.edges.length) {
       v.hx = Math.cos(v.ang); v.hz = Math.sin(v.ang);
       const pitchT = Math.atan2(f.y - r.y, Math.max(hl, 0.001)); v.pitch += (pitchT - v.pitch) * k;
       q.setFromAxisAngle(up, -v.ang).multiply(qp.setFromAxisAngle(zAxis, v.pitch));
-      m4.compose(p.set(v.x, v.y + 0.03, v.z), q, carScale);
+      const far = Math.hypot(v.x - camX, v.z - camZ) > carCut;
+      const sc = far ? noCarScale : carScale;
+      m4.compose(p.set(v.x, v.y + 0.03, v.z), q, sc);
       kind.bodies.setMatrixAt(loc[i], m4); kind.glass.setMatrixAt(loc[i], m4);
       const axles = kind.m.axles;
       for (let w = 0; w < axles.length; w++) {                   // one cylinder across each axle
         off.set(axles[w] * L, L * kind.m.wheel, 0).applyQuaternion(q);
-        m4.compose(p.set(v.x + off.x, v.y + 0.03 + off.y, v.z + off.z), q, carScale); kind.wheels.setMatrixAt(loc[i] * axles.length + w, m4);
+        m4.compose(p.set(v.x + off.x, v.y + 0.03 + off.y, v.z + off.z), q, sc); kind.wheels.setMatrixAt(loc[i] * axles.length + w, m4);
       }
       if (real) {
-        const P = carLightPos, o = i * 12, sx = -v.hz * W * 0.35, sz = v.hx * W * 0.35, hy = v.y + L * 0.2;
+        const P = carLightPos, o = i * 12, sx = -v.hz * W * 0.35, sz = v.hx * W * 0.35, hy = far ? -1e6 : v.y + L * 0.2;
         const fx = v.hx * kind.half, fz = v.hz * kind.half;
         P[o] = v.x + fx + sx; P[o + 1] = hy; P[o + 2] = v.z + fz + sz;
         P[o + 3] = v.x + fx - sx; P[o + 4] = hy; P[o + 5] = v.z + fz - sz;

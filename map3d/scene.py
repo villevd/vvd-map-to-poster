@@ -19,13 +19,14 @@ from .geo import LocalFrame, polygonal
 from .mesh import Mesh, Scene
 from .terrain import Dem
 from .traffic import build_traffic
-from .airport import build_airport
+from .airport import airport_for_model
 
 
 @dataclass
 class SceneOptions:
     exaggeration: float = 1.5        # vertical exaggeration of the terrain (and bridges)
-    building_exaggeration: float | None = None   # vertical exaggeration of buildings and trees; None = same as terrain
+    building_exaggeration: float | None = None   # vertical exaggeration of buildings; None = same as terrain
+    tree_exaggeration: float | None = None       # vertical exaggeration of trees; None = same as buildings
     buildings: bool = True
     roads: bool = True
     rails: bool = True
@@ -60,6 +61,9 @@ def credits_text(scene: Scene) -> str:
         names[names.index("Overture Maps")] = "Overture Maps Foundation"
     if scene.info.get("terrain", "").startswith("AWS"):
         names.append(TERRAIN_CREDIT)
+    for c in (scene.info.get("underground") or {}).get("credits", []):
+        if c not in names:
+            names.append(c)
     return " · ".join(names)
 
 
@@ -121,7 +125,8 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
     half, side = frame.half, frame.side
     tile = frame.tile_polygon()
     exag = opts.exaggeration                             # terrain
-    bexag = exag if opts.building_exaggeration is None else opts.building_exaggeration   # buildings and trees
+    bexag = exag if opts.building_exaggeration is None else opts.building_exaggeration   # buildings
+    texag = bexag if opts.tree_exaggeration is None else opts.tree_exaggeration          # trees
     detail = max(0, min(2, opts.detail))
     step = max(5.0, side / 450.0) * (1.0, 2.0, 4.0)[detail]   # no finer than the ~6 m source elevation data   # terrain / overlay tessellation
     lift = 0.25 + side * 8e-5                            # roads stand slightly proud of the ground
@@ -161,7 +166,7 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
 
     meshes: list[Mesh] = []
     info: dict = {"sources": data.sources, "terrain": dem.source, "exaggeration": exag,
-                  "building_exaggeration": bexag}
+                  "building_exaggeration": bexag, "tree_exaggeration": texag}
 
     # ---- buildings ------------------------------------------------------------------------------
     log("  * Extruding buildings: footprint, walls, roof; heights from the map data or estimated from the type...")
@@ -217,11 +222,11 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
             # Medium distance: camera-facing impostor cards drawn by the viewer instead of 3-D trees
             h_real = rng.uniform(5.0, 11.0, len(pos))
             card = np.column_stack([pos[:, 0], pos[:, 1], ground_z(pos[:, 0], pos[:, 1]), 0.4 * h_real,
-                                    h_real * bexag, rng.uniform(0.85, 1.12, len(pos))]).astype(np.float32)
+                                    h_real * texag, rng.uniform(0.85, 1.12, len(pos))]).astype(np.float32)
             meshes.append(Mesh(name="tree-impostors", role="tree", vertices=np.zeros((0, 3), np.float32),
                                faces=np.zeros((0, 3), np.int32), tags={"impostors": card}))
         elif len(pos) and detail == 0:
-            v, f, tint_t, tree_tops, tree_pos, tree_var = gnd.tree_geometry(pos, ground_z, bexag, rng)
+            v, f, tint_t, tree_tops, tree_pos, tree_var = gnd.tree_geometry(pos, ground_z, texag, rng)
             tree_mesh = Mesh(name="trees", role="tree", vertices=v.astype(np.float32), faces=f,
                              tint=tint_t.astype(np.float32), variant=tree_var, flat=False, casts_shadow=True,   # smooth crowns, not faceted
                              base=ground_z(v[:, 0], v[:, 1]).astype(np.float32))
@@ -307,8 +312,10 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
     # ---- traffic (animated by the viewer, not part of the mesh) ---------------------------------------------------
     if opts.traffic and opts.roads:
         info["traffic"] = build_traffic(data.roads, data.signals, data.stop_signs, ground_z, lift, side, log=log)
-    if opts.airport and data.runways:
-        info["airport"] = build_airport(data.runways, ground_z, lift, opts.exaggeration, log=log)
+    if opts.airport:
+        info["airport"], note = airport_for_model(data.runways, ground_z, lift, opts.exaggeration, log=log, half=frame.half)
+        if note:
+            info["airport_note"] = note
 
     log("  * Adding the base plinth and finishing the model...")
     # ---- base frame -----------------------------------------------------------------------------------------------------
@@ -329,7 +336,7 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
     scene.info["dem_min_m"] = float(zmin)
     scene.info["base_m"] = float(base)
     scene.info["elevation_grid"] = elevation_grid(dem, half)
-    # (scene z of a point = (elevation - dem_min_m) * exaggeration + base_m; buildings and trees add height * building_exaggeration)
+    # (scene z of a point = (elevation - dem_min_m) * exaggeration + base_m; buildings add height * building_exaggeration)
     log(f"✓ Scene ready: {scene.n_faces:,} triangles in {time.time() - t0:.1f}s")
     return scene
 
@@ -395,14 +402,17 @@ def build_tiled_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOp
 
         info["traffic"] = build_traffic(data.roads, data.signals, data.stop_signs, area_ground_z, lift_t,
                                         2 * frame.half, log=log)
-    if opts.airport and data.runways:
+    if opts.airport:
         base_t = 0.045 * 2 * half_t
         lift_t = 0.25 + 2 * half_t * 8e-5
 
         def area_ground_z_air(x, y):
             return (dem.sample(np.asarray(x), np.asarray(y)).astype(np.float64) - zmin) * opts.exaggeration + base_t
 
-        info["airport"] = build_airport(data.runways, area_ground_z_air, lift_t, opts.exaggeration, log=log)
+        info["airport"], note = airport_for_model(data.runways, area_ground_z_air, lift_t, opts.exaggeration, log=log,
+                                                  half=frame.half)
+        if note:
+            info["airport_note"] = note
     scene = Scene(meshes=meshes, half=frame.half, z_range=(float(zs.min()), float(zs.max())),
                   center_lonlat=(frame.lon, frame.lat), title=title, info=info,
                   light_bearing=opts.light_bearing, light_elevation=opts.light_elevation)

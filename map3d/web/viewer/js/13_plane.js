@@ -3,8 +3,28 @@ const planeRoot = new THREE.Group();
 root.add(planeRoot);
 const landBtn = $('landBtn'), followBox = $('followBox');
 let planeUpdate = null;
-if (CFG.airport && CFG.airport.pts.length >= 6) {
-  const ap = CFG.airport;
+// No runway in the model (older file, or none mapped): lay a straight one across the middle, on the terrain as loaded now.
+function syntheticAirport() {
+  const half = CFG.half, len = Math.max(0.8 * half, 400), appr = 0.5 * half, STEP = 20;
+  const lift = 0.25 + 2 * half * 8e-5, tan3 = Math.tan(3 * Math.PI / 180) / root.scale.y;
+  let last = CFG.zrange[0];
+  const gy = (x, z) => {
+    const y = groundYBelow(new THREE.Vector3(x, CFG.zrange[1] + 10 * H, z));
+    if (y !== null) last = y / root.scale.y;
+    return last + lift;
+  };
+  const x0 = len / 2, pts = [], runway = [];
+  for (let d = appr; d > 0; d -= STEP) pts.push(x0 + d, gy(x0 + d, 0) + d * tan3, 0);
+  pts.push(x0, gy(x0, 0), 0);
+  const n = Math.max(2, Math.floor(len / STEP) + 1);
+  for (let i = 0; i < n; i++) {
+    const x = x0 - len * i / (n - 1), y = gy(x, 0);
+    runway.push(x, y, 0);
+    if (i) pts.push(x, y, 0);
+  }
+  return { pts, runway, touchdown_m: appr, roll_m: len, cruise_ms: 70 };
+}
+function initPlane(ap) {
   const PATH = Float32Array.from(ap.pts), N = PATH.length / 3;
   const cum = new Float64Array(N);
   for (let i = 1; i < N; i++) {
@@ -49,10 +69,11 @@ if (CFG.airport && CFG.airport.pts.length >= 6) {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(L * 0.012, 8, 6), new THREE.MeshBasicMaterial({ color: c }));
     dot.position.set(x * L, y * L, z * L); plane.add(dot);
   }
-  const planeGroup = new THREE.Group();
+  // anchor: placed in the (vertically exaggerated) model space; fix: cancels that stretch so the plane keeps its shape
+  const planeAnchor = new THREE.Group(), planeFix = new THREE.Group(), planeGroup = new THREE.Group();
   planeGroup.add(plane);
   planeGroup.visible = false;
-  planeRoot.add(planeGroup);
+  planeFix.add(planeGroup); planeAnchor.add(planeFix); planeRoot.add(planeAnchor);
 
   // position and heading on the path at distance s (metres from the start of the approach)
   const sample = s => {
@@ -89,6 +110,7 @@ if (CFG.airport && CFG.airport.pts.length >= 6) {
     lastP.copy(pWorld);
   };
   planeUpdate = dt => {
+    planeFix.scale.y = 1 / root.scale.y;
     if (!st.active) return;
     st.s += speedAt(st.s) * dt;
     // the plane stops one runway length after touchdown (the 3-D path can be a few metres longer than that)
@@ -96,7 +118,7 @@ if (CFG.airport && CFG.airport.pts.length >= 6) {
     if (st.s >= END - 0.05) { st.s = END; st.active = false; st.done = true; landBtn.textContent = 'Land again'; }
     const f = sample(st.s);
     st.yaw = f.yaw;
-    planeGroup.position.set(f.x, f.y + L * 0.03, f.z);
+    planeAnchor.position.set(f.x, f.y + L * 0.03 / root.scale.y, f.z);
     q1.setFromAxisAngle(up, f.yaw); q2.setFromAxisAngle(zA, f.pitch);
     planeGroup.quaternion.copy(q1).multiply(q2);
     if (st.follow) follow(dt);
@@ -107,9 +129,11 @@ if (CFG.airport && CFG.airport.pts.length >= 6) {
     lastP.copy(planeGroup.getWorldPosition(new THREE.Vector3()));
   };
   followBox.onchange = () => { st.follow = followBox.checked; st.locked = false; };
-} else {
-  landBtn.disabled = true; landBtn.textContent = 'No airport in this model';
-  followBox.parentElement.style.display = 'none';
+}
+if (CFG.airport && CFG.airport.pts.length >= 6) initPlane(CFG.airport);
+else {
+  landBtn.title = 'No runway in the map data: a generated one is used';
+  landBtn.onclick = () => { initPlane(syntheticAirport()); landBtn.onclick(); };
 }
 
 let lastFrameT = performance.now();

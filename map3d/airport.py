@@ -32,7 +32,44 @@ def _longest_runway(runways) -> LineString | None:
     return best
 
 
-def build_airport(runways, ground_z, lift: float, exaggeration: float, log=print) -> dict | None:
+def no_airport_reason(runways) -> str:
+    """Why build_airport found no runway, in words the viewer can show."""
+    lines = [part for geom in runways or [] if geom is not None
+             for part in getattr(geom, "geoms", [geom]) if part.geom_type == "LineString"]
+    if not lines:
+        return "no aeroway=runway features in the OpenStreetMap data for this area"
+    longest = max(part.length for part in lines)
+    return (f"{len(lines)} runway piece(s) found in OpenStreetMap, but none is at least {MIN_RUNWAY_M:.0f} m "
+            f"long (longest {longest:.0f} m)")
+
+
+def airport_for_model(runways, ground_z, lift: float, exaggeration: float, log=print,
+                      half: float | None = None) -> tuple[dict | None, str | None]:
+    """
+    The airport dict, or None with the reason it is missing.
+
+    When OpenStreetMap has no usable runway and ``half`` (the model's half-width, scene metres) is given, a
+    generated runway is placed at the model centre so the plane can still land. The note then says so.
+    """
+    ap = build_airport(runways, ground_z, lift, exaggeration, log=log) if runways else None
+    if ap is not None:
+        return ap, None
+    note = no_airport_reason(runways)
+    if half is None:
+        log(f"⚠ No airport in this model: {note}")
+        return None, note
+    # generated runway: 80% of the model's width, centred, approach 50% of the half-width out (stays inside the model)
+    length = max(0.8 * half, MIN_RUNWAY_M)      # never shorter than the OSM filter, so build_airport accepts it
+    fake = LineString([(-length / 2, 0.0), (length / 2, 0.0)])
+    ap = build_airport([fake], ground_z, lift, exaggeration, log=log, approach_m=0.5 * half)
+    if ap is None:
+        log(f"⚠ No airport in this model: {note}")
+        return None, note
+    log(f"⚠ No runway in the OpenStreetMap data ({note}); a generated runway is used for the plane.")
+    return ap, note
+
+
+def build_airport(runways, ground_z, lift: float, exaggeration: float, log=print, approach_m: float = APPROACH_M) -> dict | None:
     """
     Runway and landing path for the viewer, in three.js coordinates (x east, y up, z = -north).
 
@@ -56,7 +93,7 @@ def build_airport(runways, ground_z, lift: float, exaggeration: float, log=print
     u = (b - a) / length                  # landing direction, threshold -> far end
     o = -u                                # outward, along the approach
 
-    d_app = np.arange(APPROACH_M, 0.0, -STEP_M)
+    d_app = np.arange(approach_m, 0.0, -STEP_M)
     d_app = np.append(d_app, 0.0)
     t_run = np.linspace(0.0, length, max(2, int(length / STEP_M) + 1))
     d_all = np.concatenate([d_app, t_run[1:]])
@@ -71,11 +108,11 @@ def build_airport(runways, ground_z, lift: float, exaggeration: float, log=print
     rx, ry = a[0] + u[0] * t_run, a[1] + u[1] * t_run
     rz = np.asarray(ground_z(rx, ry), dtype=np.float64) + lift
     runway = np.column_stack([rx, rz, -ry])
-    log(f"✓ Airport: runway {length:.0f} m, glide path from {APPROACH_M:.0f} m out")
+    log(f"✓ Airport: runway {length:.0f} m, glide path from {approach_m:.0f} m out")
     return {
         "pts": np.round(pts, 2).ravel().tolist(),
         "runway": np.round(runway, 2).ravel().tolist(),
-        "touchdown_m": round(APPROACH_M, 1),   # distance along the path where the wheels touch the runway
+        "touchdown_m": round(approach_m, 1),   # distance along the path where the wheels touch the runway
         "roll_m": round(length, 1),
         "cruise_ms": CRUISE_MS,
     }

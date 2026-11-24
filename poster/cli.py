@@ -231,9 +231,10 @@ Examples:
         "--3d-outputs",
         dest="outputs",
         type=str,
-        default="poster,html",
-        help="With --3d: comma-separated outputs from poster (rendered image), html (interactive viewer), "
-             "glb (colored 3D model), stl (3D-printing geometry). Default: poster,html",
+        default="poster,db",
+        help="With --3d: comma-separated outputs from poster (rendered image), db (baked map: the viewer data and "
+             "the exports in one file, opened by the GUI), html (standalone interactive page), glb (colored 3D model), "
+             "stl (3D-printing geometry). Default: poster,db",
     )
     parser.add_argument(
         "--azimuth",
@@ -303,8 +304,14 @@ Examples:
         action="store_false",
         help="With --3d: use OpenStreetMap only, skip Overture Maps footprints/heights/land cover",
     )
+    parser.add_argument(
+        "--no-underground",
+        dest="underground",
+        action="store_false",
+        help="With --3d: skip the geology, mines, drill holes and mining claims shown in the underground cutaway",
+    )
     parser.set_defaults(railways=True, buildings=True, labels=True, gradient=True, trees=True, terrain=True,
-                        overture=True, traffic=True)
+                        overture=True, traffic=True, underground=True)
 
     args = parser.parse_args()
 
@@ -418,6 +425,7 @@ Examples:
                 use_overture=args.overture,
                 tiles=args.tiles,
                 include_traffic=args.traffic,
+                include_underground=args.underground,
             )
 
         for theme_name in themes_to_generate:
