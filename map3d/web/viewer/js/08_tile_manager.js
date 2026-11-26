@@ -73,6 +73,8 @@ quality.onchange = () => {
   qualityScale = { auto: 1, high: 1.8, low: 0.5, potato: 0.3 }[quality.value];
   // resolution, shadows and textures follow from PERF.gfx; give the controller a clean start at the new setting
   PERF.gfx = quality.value === 'potato' ? 1 : (quality.value === 'low' ? 0.5 : 0); PERF.applyGfx();
+  // the ground picture is cut at a different resolution for High: re-apply it to the tiles that show one
+  if (imgOn.sat || imgOn.bld) tileList.forEach(t => syncImagery(t));
 };
 shadowsOn.onchange = updateTiles;
 

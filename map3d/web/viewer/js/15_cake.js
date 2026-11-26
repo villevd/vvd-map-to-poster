@@ -117,7 +117,7 @@ function buildRoundRim(grp, W, u, top, fondant) {
     return hs[i] + (hs[j] - hs[i]) * t;
   };
   const pts = hs.map((h, k) => { const a = k / NR * Math.PI * 2; return new THREE.Vector3(R * Math.cos(a), h - lipR * 0.4, R * Math.sin(a)); });
-  const lip = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), NR * 4, lipR, 12, true), fondant);
+  const lip = new THREE.Mesh(flatLip(pts, true, lipR * 1.3, lipR * 0.5), fondant);
   lip.castShadow = lip.receiveShadow = true; grp.add(lip);
   // a solid wall from the cake's top layer up to the rim, so the edge is attached to the cake instead of floating
   const wp = [], wi = [], rr = R * 0.998;
@@ -130,7 +130,8 @@ function buildRoundRim(grp, W, u, top, fondant) {
   wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wallGeo.setIndex(wi); wallGeo.computeVertexNormals();
   // plain cream, not the icing picture: the map's colours would stream down the wall
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xfff1d6, roughness: 0.8, side: THREE.DoubleSide });
-  const wall = new THREE.Mesh(wallGeo, wallMat); wall.castShadow = wall.receiveShadow = true; grp.add(wall);
+  wallMat.shadowSide = THREE.BackSide;
+  const wall = new THREE.Mesh(wallGeo, wallMat); wall.castShadow = true; wall.receiveShadow = false; grp.add(wall);   // no receiving: no acne speckle
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const put = (geo, x, yy, z) => { const o = new THREE.Mesh(geo, fondant); o.position.set(x, yy, z); o.castShadow = o.receiveShadow = true; grp.add(o); return o; };
   for (let k = 0; k < 96; k++) {
@@ -142,6 +143,31 @@ function buildRoundRim(grp, W, u, top, fondant) {
     put(new THREE.SphereGeometry(rb * 1.08, 14, 10), x, y0 - len, z);
     put(new THREE.SphereGeometry(rt * 1.05, 14, 10), x, y0, z);
   }
+}
+
+// A flat, ribbon-like lip: an ellipse of half-width halfW (sideways from the edge) and half-height halfH swept along the
+// curve, instead of a round tube. Closed curves wrap around; open ones end at their last point.
+function flatLip(points, closed, halfW, halfH) {
+  const curve = new THREE.CatmullRomCurve3(points, closed);
+  const S = points.length * 4, M = 10, up = new THREE.Vector3(0, 1, 0);
+  const p = new THREE.Vector3(), tg = new THREE.Vector3(), out = new THREE.Vector3(), pos = [], idx = [];
+  const rings = closed ? S : S + 1;
+  for (let i = 0; i < rings; i++) {
+    curve.getPointAt(i / S, p); curve.getTangentAt(i / S, tg);
+    out.crossVectors(up, tg).normalize();
+    if (out.x * p.x + out.z * p.z < 0) out.negate();   // point away from the middle of the cake
+    for (let j = 0; j < M; j++) {
+      const a = j / M * Math.PI * 2, c = Math.cos(a) * halfW;
+      pos.push(p.x + out.x * c, p.y + Math.sin(a) * halfH, p.z + out.z * c);
+    }
+  }
+  for (let i = 0; i < (closed ? S : S); i++) for (let j = 0; j < M; j++) {
+    const a = i * M + j, b = i * M + (j + 1) % M, c = ((i + 1) % rings) * M + j, d = ((i + 1) % rings) * M + (j + 1) % M;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
 }
 
 function buildCake() {
@@ -175,8 +201,10 @@ function buildCake() {
   let y = top - total;
   for (const [m, th, bulge] of layers.slice().reverse()) {   // built bottom-up
     const w = W * (1 + bulge) * 2, h = th * u;
-    add(round ? new THREE.CylinderGeometry(w / 2, w / 2, h, 128) : new THREE.BoxGeometry(w, h, w), m, 0, y + h / 2, 0);
-    if (round) m.shadowSide = THREE.BackSide;   // a closed cylinder casting from its back faces does not shadow its own lit side (no acne streaks)
+    const lay = add(round ? new THREE.CylinderGeometry(w / 2, w / 2, h, 128) : new THREE.BoxGeometry(w, h, w), m, 0, y + h / 2, 0);
+    if (round) {   // a closed cylinder casting from its back faces does not shadow its own lit side; receiving shadows is what speckles it
+      m.shadowSide = THREE.BackSide; lay.receiveShadow = false;
+    }
     y += h;
   }
   // The icing takes its colour from a top-down picture of the map (captured in renderCakePng). The picture is clamped
@@ -213,8 +241,7 @@ function buildCake() {
     };
     const step = Math.max(1, Math.floor(line.length / 90));
     const keep = line.filter((_, i) => i % step === 0 || i === line.length - 1);
-    const curve = new THREE.CatmullRomCurve3(keep.map(([x, yy]) => new THREE.Vector3(x, yy - lipR * 0.4, zc)));
-    put(new THREE.TubeGeometry(curve, keep.length * 3, lipR, 12, false), 0, 0, 0);
+    put(flatLip(keep.map(([x, yy]) => new THREE.Vector3(x, yy - lipR * 0.4, zc)), false, lipR * 1.3, lipR * 0.5), 0, 0, 0);
     cornerY[sd] = [line[0][1], line[line.length - 1][1]];
     const DR = 16;
     for (let k = 0; k < DR; k++) {
@@ -292,7 +319,42 @@ function cakeProbe() {   // stand each candle on whatever is under it (roof, gro
   return missing;
 }
 
+// A message set on an arc standing over the cake, like a rainbow banner: the letters follow the arc and point outward,
+// and the arc faces the camera. `centreY` is the height of the arc's centre; `azimuth` is the camera's compass bearing.
+function cakeTextArch(text, W, centreY, azimuth) {
+  const FONT = '800 220px "Segoe UI", "Trebuchet MS", system-ui, sans-serif', PH = 320;
+  const probe = document.createElement('canvas').getContext('2d'); probe.font = FONT;
+  const cw = Math.ceil(probe.measureText(text).width) + 120;
+  const c = document.createElement('canvas'); c.width = cw; c.height = PH;
+  const g = c.getContext('2d'); g.font = FONT; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+  const grad = g.createLinearGradient(0, 40, 0, PH - 40); grad.addColorStop(0, '#ff8fb8'); grad.addColorStop(1, '#ffc94d');
+  g.lineWidth = 34; g.strokeStyle = '#5a2d1b'; g.strokeText(text, cw / 2, PH / 2 + 8);
+  g.lineWidth = 12; g.strokeStyle = '#fff6e6'; g.strokeText(text, cw / 2, PH / 2 + 8);
+  g.fillStyle = grad; g.fillText(text, cw / 2, PH / 2 + 8);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const R = W * 0.95;
+  let h = W * 0.3;
+  const spanOf = hh => (hh * cw / PH) / (R + hh / 2);
+  if (spanOf(h) > 3.3) h *= 3.3 / spanOf(h);            // a long message gets smaller letters, never more than ~190 degrees
+  const span = spanOf(h), seg = 120, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= seg; i++) {
+    const t = i / seg, th = Math.PI / 2 + span / 2 - t * span, cs = Math.cos(th), sn = Math.sin(th);   // left to right over the top
+    pos.push(R * cs, R * sn, 0, (R + h) * cs, (R + h) * sn, 0); uv.push(t, 0, t, 1);
+    if (i) { const a = 2 * i - 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.08, side: THREE.DoubleSide, toneMapped: false }));
+  const dir = dirFromCompass(azimuth, 27), grp = new THREE.Group();
+  grp.rotation.y = Math.atan2(dir.x, dir.z);               // the arc's plane faces the camera
+  grp.position.set(0, centreY, 0); grp.add(mesh);
+  cake.textTex = tex;
+  return { group: grp, top: centreY + R + h };
+}
+
 function cakeDispose() {
+  if (cake.textTex) { cake.textTex.dispose(); cake.textTex = null; }
   if (cake.undo) { cake.undo.forEach(f => f()); cake.undo = null; }   // the model's own plinth and wall come back
   if (!cake.group) return;
   scene.remove(cake.group);
@@ -338,9 +400,15 @@ async function renderCakePng(round) {
     for (let i = 0; i < 6; i++) { root.updateMatrixWorld(true); if (!cakeProbe()) break; await nextFrames(8); }
     // three-quarter view, low enough to show the layers on the sides
     const W = N * T / 2, box = new THREE.Box3().setFromObject(cake.group), mid = box.getCenter(new THREE.Vector3());
+    // the message arches over the candles; it is added after the cake is measured so it does not move the framing's base
+    const msg = ($('cakeText') ? $('cakeText').value : '').trim().slice(0, 60);
+    if (msg) {
+      const cakeTop = Math.max(...cake.candles.map(c => c.g.position.y)) + W * 0.2 + W * 0.04;   // candle height + flame
+      cake.group.add(cakeTextArch(msg, W, cakeTop, CFG.camera.azimuth).group);
+    }
     // the look-at point drops, so the camera drops with it and the cake sits higher in the frame (its bottom edge was cut off)
-    controls.target.set(0, mid.y - W * 0.02 - W * 0.45, 0);
-    camera.position.copy(controls.target).add(dirFromCompass(CFG.camera.azimuth, 27).multiplyScalar(W * 4.3));
+    controls.target.set(0, mid.y - W * 0.02 - W * 0.45 + (msg ? W * 0.5 : 0), 0);
+    camera.position.copy(controls.target).add(dirFromCompass(CFG.camera.azimuth, 27).multiplyScalar(W * (msg ? 5.6 : 4.3)));
     controls.update(); clipDist = 0; fitClip();
     await nextFrames(40);
     // one big frame, then straight back to the window size within the same tick, so nobody sees it

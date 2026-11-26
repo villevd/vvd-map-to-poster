@@ -60,10 +60,12 @@ def feathered_points(geom: BaseGeometry | None, spacing: float, feather: float, 
 
 
 def plan_trees(forest: BaseGeometry | None, parks: BaseGeometry | None, mapped: np.ndarray, max_trees: int,
-               avoid: BaseGeometry | None, rng: np.random.Generator, half: float) -> np.ndarray:
+               avoid: BaseGeometry | None, rng: np.random.Generator, half: float,
+               on_green=None) -> np.ndarray:
     """
     Positions of all trees: mapped ones plus a procedural scatter in forests and (sparser) in parks.
-    The scatter fades out smoothly across each outline (see ``feathered_points``).
+    The scatter fades out smoothly across each outline (see ``feathered_points``). ``on_green``, when given,
+    maps points to a bool array and only the True ones keep a tree (bare ground in the photo gets none).
     """
     f_area = forest.area if forest is not None and not forest.is_empty else 0.0
     p_area = parks.area if parks is not None and not parks.is_empty else 0.0
@@ -79,6 +81,8 @@ def plan_trees(forest: BaseGeometry | None, parks: BaseGeometry | None, mapped: 
     allp = np.concatenate([f_pts, p_pts, np.asarray(mapped).reshape(-1, 2)])
     if len(allp) and avoid is not None and not avoid.is_empty:
         allp = allp[~shapely.contains_xy(avoid, allp[:, 0], allp[:, 1])]
+    if len(allp) and on_green is not None:
+        allp = allp[np.asarray(on_green(allp), dtype=bool)]
     if len(allp) > max_trees:
         allp = allp[rng.choice(len(allp), max_trees, replace=False)]
     return allp

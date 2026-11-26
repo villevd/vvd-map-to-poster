@@ -13,6 +13,8 @@
   #ui select { width: 100%; padding: 6px 8px; border-radius: 8px; color: var(--text); font: inherit;
     background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); }
   #ui input[type=range] { width: 100%; accent-color: var(--text); }
+  #ui input[type=text] { width: 100%; padding: 6px 8px; border-radius: 8px; color: var(--text); font: inherit;
+    background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid color-mix(in srgb, var(--text) 35%, transparent); }
   #ui input[type=checkbox] { accent-color: var(--text); }
   #ui .btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
   #ui button { flex: 1; padding: 7px 10px; border-radius: 8px; cursor: pointer; color: var(--text);

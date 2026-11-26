@@ -99,7 +99,8 @@ function satBitmap(z, x, y) {
 async function buildSatCanvas(tile, boost = 0, cap = 144) {
   const th = T / 2, cx = tile.center.x, my = -tile.center.z;
   const [w, s] = metresToLonLat(cx - th, my - th), [e, n] = metresToLonLat(cx + th, my + th);
-  const S = boost ? (N > 1 ? 4096 : 6144) : (N > 1 ? 1024 : 2048);   // close-up: about three times the base sharpness
+  // Quality "High" asks for a sharper base picture for every tile, not only for the ones the camera is close to
+  const S = boost ? (N > 1 ? 4096 : 6144) : satBaseHigh() ? (N > 1 ? 2048 : 4096) : (N > 1 ? 1024 : 2048);   // close-up: about three times the base sharpness
   const merc = (lon, lat, z) => [(lon + 180) / 360 * 2 ** z,
     (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** z];
   const tile2lon = (x, z) => x / 2 ** z * 360 - 180;
@@ -227,9 +228,14 @@ async function loadSatHi(tile) {
   } catch (e) { /* a canvas that cannot be exported is still shown, just not stored */ }
   return satTextureFrom(c);
 }
+/** True when the Quality setting is High: the base ground picture is then cut at higher resolution. */
+function satBaseHigh() { return quality.value === 'high'; }
 function satTexture(tile) {
   if (tile.satHi) return Promise.resolve(tile.satHi);   // the close-up picture replaces the base one once it is ready
-  if (!tile.sat) tile.sat = buildSatTexture(tile).catch(() => null);
+  // A base picture cut for the other Quality setting is rebuilt, so switching to High actually gets the sharper picture
+  const q = satBaseHigh();
+  if (tile.sat && tile.satQ !== q) tile.sat = null;
+  if (!tile.sat) { tile.sat = buildSatTexture(tile).catch(() => null); tile.satQ = q; }
   return tile.sat;
 }
 /** Close to a tile the ground picture is re-cut at about twice the resolution, once; the base picture stays until then. */

@@ -45,7 +45,7 @@ function syncPickers() {
   });
 }
 // Five shades of the tree colour: small hue, saturation and lightness shifts, so the trees stay one family
-const TREE_SHIFTS = [[0, 0, 0], [0.015, 0.05, 0.05], [-0.02, -0.08, -0.04], [0.03, 0, -0.06], [-0.035, 0.1, 0.02]];
+const TREE_SHIFTS = [[0, 0, 0], [0.015, 0.05, 0.04], [-0.02, -0.05, -0.02], [0.03, 0, -0.03], [-0.035, 0.08, 0.03]];
 // "Match ground": same hue and saturation as the ground, only slightly darker or lighter, randomised per tree
 const MATCH_SHIFTS = [[0, 0, 0], [0, 0, 0.05], [0, 0, -0.05], [0, 0, 0.09], [0, 0, -0.08]];
 // Natural tree colours (sRGB 0-1) used when the ground is not green or brown: the nearest one is taken
@@ -77,8 +77,10 @@ function treeBase() {
 }
 function treePalette() {
   const base = treeBase(), hsl = toHsl(base), match = $('treeMatch').checked;
+  // Lightness never drops below a visible vegetation green: shades near black read as dead spikes over the photo
+  const lo = Math.min(hsl.l, 0.22), hi = Math.max(hsl.l, 0.40);
   return (match ? MATCH_SHIFTS : TREE_SHIFTS).map(([dh, ds, dl]) => new THREE.Color().setHSL(
-    (hsl.h + dh + 1) % 1, Math.min(1, Math.max(0, hsl.s + ds)), Math.min(1, Math.max(0, hsl.l + dl)), THREE.SRGBColorSpace));
+    (hsl.h + dh + 1) % 1, Math.min(1, Math.max(0, hsl.s + ds)), Math.min(hi, Math.max(lo, hsl.l + dl)), THREE.SRGBColorSpace));
 }
 // Trees with a baked shade: each tree's colour is written per vertex (shade x tint), and the material is
 // white, or the season's tint when snow is on.

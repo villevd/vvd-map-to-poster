@@ -16,6 +16,7 @@ from . import ground as gnd
 from . import markings as mk
 from .data import CityData, tile_data
 from .geo import LocalFrame, polygonal
+from .ground.greenmask import photo_green_test
 from .mesh import Mesh, Scene
 from .terrain import Dem
 from .traffic import build_traffic
@@ -217,7 +218,9 @@ def build_scene(frame: LocalFrame, data: CityData, dem: Dem, opts: SceneOptions,
         avoid = _union(np.asarray(avoid_parts, dtype=object)) if avoid_parts else None
         # The tree budget follows the tile's area, so density is the same however the area is cut into tiles
         max_trees = max(500, int(opts.max_trees * min(1.0, (side / 3000.0) ** 2)))
-        pos = gnd.plan_trees(forest, parks, data.trees, max_trees, avoid, rng, half)
+        # Trees only where the satellite photo is green: bare earth, sand and pavement inside a mapped park get none
+        pos = gnd.plan_trees(forest, parks, data.trees, max_trees, avoid, rng, half,
+                             on_green=photo_green_test(frame, log))
         if len(pos) and detail == 1:
             # Medium distance: camera-facing impostor cards drawn by the viewer instead of 3-D trees
             h_real = rng.uniform(5.0, 11.0, len(pos))

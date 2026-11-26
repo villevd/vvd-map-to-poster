@@ -23,6 +23,7 @@ const zc = (CFG.zrange[0] + CFG.zrange[1]) * 0.25;
 const camera = new THREE.PerspectiveCamera(32, window.innerWidth / window.innerHeight, T * 0.01, H * 60);
 const controls = new OrbitControls(camera, renderer.domElement);
 Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, maxPolarAngle: Math.PI / 2 - 0.03,
+  zoomSpeed: 0.35,   // each wheel notch moves about 1.7% instead of the default 5%, so zooming is not a jump
   minDistance: Math.min(T * 0.08, 25), maxDistance: H * 14 });
 controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };   // left drag moves, right drag orbits
 controls.target.set(0, zc, 0);

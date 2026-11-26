@@ -33,7 +33,53 @@ function ugInit() {
   const px = () => dSoil() / 2;   // one texture pixel, so the topsoil is two pixels thick
 
   // ---- terrain height under (x, z): ray down onto the ground meshes of the tiles that are loaded
-  const ray = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0), ORG = new THREE.Vector3();
+  // A Raycaster tests every triangle of every ground mesh, and a rebuild asks for about a thousand heights, which froze
+  // the page. Instead each ground mesh gets a flat XZ grid of its triangles (built once per geometry, rebuilt only when
+  // the mesh moves or the exaggeration changes), and a height is read from the few triangles in one cell.
+  const gridOf = new WeakMap();
+  function groundGrid(mesh) {
+    const g = mesh.geometry, mw = mesh.matrixWorld.elements, sy = root.scale.y;
+    const old = gridOf.get(g);
+    if (old && old.sy === sy && old.mw.every((v, i) => v === mw[i])) return old;
+    const pos = g.attributes.position, ix = g.index, nT = ix ? ix.count / 3 : pos.count / 3;
+    const P = new Float32Array(pos.count * 3), v = new THREE.Vector3();
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      P[i * 3] = v.x; P[i * 3 + 1] = v.y; P[i * 3 + 2] = v.z;
+      if (v.x < x0) x0 = v.x; if (v.x > x1) x1 = v.x; if (v.z < z0) z0 = v.z; if (v.z > z1) z1 = v.z;
+    }
+    const N = 64, cw = (x1 - x0) / N || 1, ch = (z1 - z0) / N || 1;
+    const cells = Array.from({ length: N * N }, () => []);
+    const cell = (c, lo, w) => Math.max(0, Math.min(N - 1, Math.floor((c - lo) / w)));
+    for (let t = 0; t < nT; t++) {
+      const a = ix ? ix.getX(3 * t) : 3 * t, b = ix ? ix.getX(3 * t + 1) : 3 * t + 1, c = ix ? ix.getX(3 * t + 2) : 3 * t + 2;
+      const i0 = cell(Math.min(P[a * 3], P[b * 3], P[c * 3]), x0, cw), i1 = cell(Math.max(P[a * 3], P[b * 3], P[c * 3]), x0, cw);
+      const j0 = cell(Math.min(P[a * 3 + 2], P[b * 3 + 2], P[c * 3 + 2]), z0, ch), j1 = cell(Math.max(P[a * 3 + 2], P[b * 3 + 2], P[c * 3 + 2]), z0, ch);
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) cells[j * N + i].push(t);
+    }
+    const G = { sy, mw: mw.slice(), ix, P, N, x0, z0, cw, ch, cells };
+    gridOf.set(g, G); return G;
+  }
+  // the highest surface of one mesh at (x, z), or null: the same answer a ray cast straight down would give
+  function meshHeight(G, x, z) {
+    const i = Math.floor((x - G.x0) / G.cw), j = Math.floor((z - G.z0) / G.ch);
+    if (i < 0 || j < 0 || i >= G.N || j >= G.N) return null;
+    const P = G.P; let best = null;
+    for (const t of G.cells[j * G.N + i]) {
+      const a = (G.ix ? G.ix.getX(3 * t) : 3 * t) * 3, b = (G.ix ? G.ix.getX(3 * t + 1) : 3 * t + 1) * 3, c = (G.ix ? G.ix.getX(3 * t + 2) : 3 * t + 2) * 3;
+      const ax = P[a], az = P[a + 2], bx = P[b], bz = P[b + 2], cx = P[c], cz = P[c + 2];
+      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+      if (Math.abs(d) < 1e-12) continue;
+      const u = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d;
+      const w = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d;
+      const k = 1 - u - w, eps = -1e-6;
+      if (u < eps || w < eps || k < eps) continue;
+      const y = u * P[b + 1] + w * P[c + 1] + k * P[a + 1];
+      if (best === null || y > best) best = y;
+    }
+    return best;
+  }
   function groundList() {
     const out = [];
     for (const t of tileList) {
@@ -47,10 +93,10 @@ function ugInit() {
   function heightAt(x, z) {
     const k = Math.round(x * 2) + ',' + Math.round(z * 2);
     let h = S.hCache.get(k); if (h !== undefined) return h;
-    ray.set(ORG.set(x, 1e5, z), DOWN);
-    const hit = ray.intersectObjects(S.list, false)[0];
-    if (!hit) return null;
-    h = hit.point.y / root.scale.y; S.hCache.set(k, h); return h;
+    let top = null;
+    for (const mesh of S.list) { const y = meshHeight(groundGrid(mesh), x, z); if (y !== null && (top === null || y > top)) top = y; }
+    if (top === null) return null;
+    h = top / root.scale.y; S.hCache.set(k, h); return h;
   }
   const clampH = v => Math.max(-H + 0.3, Math.min(H - 0.3, v));   // a ray exactly on the model's edge can slip between tiles
   function surface(x, z, fallback) {
@@ -288,19 +334,16 @@ function ugInit() {
     }
     // claims: a faint curtain from the surface to the floor, and a bright outline on the ground
     const claims = UGD.claims || [];
+    const CURTAIN = 220 * EX.t;   // corner posts go down this far
     if (claims.length) {
       const cg = new THREE.Group(); cg.userData.kind = 'claims';
-      const cpos = [], cidx = [], lpos = [];
+      const lpos = [];   // lines only: no see-through walls, which cost far too much to draw
       claims.forEach((c, k) => {
         const ring = c.ring.slice(0, -1), ys = ring.map(p => surface(p[0], -p[1], fallback));
-        const base = cpos.length / 3;
-        ring.forEach((p, i) => { cpos.push(p[0], ys[i], -p[1], p[0], floorY, -p[1]); });
-        for (let i = 0; i < ring.length; i++) { const j = (i + 1) % ring.length; cidx.push(base + i * 2, base + i * 2 + 1, base + j * 2, base + j * 2, base + i * 2 + 1, base + j * 2 + 1); }
+        ring.forEach((p, i) => { lpos.push(p[0], ys[i] + 1.5, -p[1], p[0], Math.max(floorY, ys[i] - CURTAIN), -p[1]); });   // a post down from each corner
         ring.forEach((p, i) => { const j = (i + 1) % ring.length; lpos.push(p[0], ys[i] + 1.5, -p[1], ring[j][0], ys[j] + 1.5, -ring[j][1]); });
         pick.claims.push({ c, ring: ring.map(p => [p[0], -p[1]]) });
       });
-      const cgeo = new THREE.BufferGeometry(); cgeo.setAttribute('position', new THREE.Float32BufferAttribute(cpos, 3)); cgeo.setIndex(cidx);
-      cg.add(new THREE.Mesh(cgeo, cutMaterial(new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }))));
       const lgeo = new THREE.BufferGeometry(); lgeo.setAttribute('position', new THREE.Float32BufferAttribute(lpos, 3));
       cg.add(new THREE.LineSegments(lgeo, cutMaterial(new THREE.LineBasicMaterial({ color: 0xffd45e, transparent: true, opacity: 0.85 }))));
       f.add(cg);
@@ -365,11 +408,12 @@ function ugInit() {
     S.labels = [];
     const b = cutBox(), fallback = zc;
     // the floor sits a depth below the lowest ground sampled along the block's sides
-    let low = Infinity;
+    let low = Infinity, sum = 0, cnt = 0;
     for (let i = 0; i <= 24; i++) for (const [x, z] of [[-H + 2 * H * i / 24, -H], [-H + 2 * H * i / 24, H], [-H, -H + 2 * H * i / 24], [H, -H + 2 * H * i / 24]]) {
-      const h = heightAt(Math.max(-H + 0.5, Math.min(H - 0.5, x)), Math.max(-H + 0.5, Math.min(H - 0.5, z))); if (h !== null && h < low) low = h;
+      const h = heightAt(Math.max(-H + 0.5, Math.min(H - 0.5, x)), Math.max(-H + 0.5, Math.min(H - 0.5, z))); if (h !== null) { sum += h; cnt++; if (h < low) low = h; }
     }
     if (!isFinite(low)) low = CFG.zrange[0];
+    S.meanY = cnt ? sum / cnt : zc;
     const floorY = low - dispDepth(depthM()) - (dSoil() + dOver());
     // outer sides (skipped where the cut removes them) and the cut walls
     const inside = (x, z) => !removed(b, x, z);
@@ -496,17 +540,30 @@ function ugInit() {
     const c = hit.c; return `<b>${c.kind} ${c.id}</b><br>${c.status}<br>${c.area_ha ? Math.round(c.area_ha) + ' ha · ' : ''}expires ${f(c.expires)}<br><small>${c.source}</small>`;
   }
   function pointIn(ring, x, z) { let ins = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const [xi, zi] = ring[i], [xj, zj] = ring[j]; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) ins = !ins; } return ins; }
-  let moveEv = null;
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hitP = new THREE.Vector3(), hRay = new THREE.Raycaster();
+  function groundPointAt(cx, cy) {   // the cursor on the ground: a plane at the mean height, refined once with one ground ray
+    const r = renderer.domElement.getBoundingClientRect();
+    hRay.setFromCamera(new THREE.Vector2((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
+    const sy = root.scale.y;
+    plane.constant = -(S.meanY ?? zc) * sy;
+    if (!hRay.ray.intersectPlane(plane, hitP)) return null;
+    const h = heightAt(hitP.x, hitP.z);
+    if (h !== null) { plane.constant = -h * sy; if (!hRay.ray.intersectPlane(plane, hitP)) return null; }
+    return hitP;
+  }
+  let moveEv = null, lastHover = 0;
   renderer.domElement.addEventListener('pointermove', e => { moveEv = e; });
   function hover() {
-    const e = moveEv; moveEv = null;
+    const e = moveEv;
+    if (e && performance.now() - lastHover < 70) return;   // at most ~14 picks a second
+    moveEv = null; lastHover = performance.now();
     if (!e || !UG_STATE.on || !S.pick || e.buttons) { if (e && e.buttons) tip.hidden = true; return; }
     let best = null, bd = 16;
     if (ui.mines.checked) for (const m of S.pick.mines) { const s = screenOf(m.x, m.y, m.z); if (s) { const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY); if (d < bd) { bd = d; best = m; } } }
     if (!best && ui.drill.checked) { bd = 9; for (const m of S.pick.drill) { const s = screenOf(m.x, m.y, m.z), t = screenOf(m.end.x, m.end.y, m.end.z); for (const q of [s, t]) if (q) { const d = Math.hypot(q[0] - e.clientX, q[1] - e.clientY); if (d < bd) { bd = d; best = m; } } } }
     if (!best && ui.esker.checked && S.pick.esker) { bd = 10; for (const m of S.pick.esker) { const s = screenOf(m.x, m.y, m.z); if (s) { const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY); if (d < bd) { bd = d; best = m; } } } }
     if (!best && ui.claims.checked) {
-      const p = terrainPointAt(e.clientX, e.clientY);
+      const p = groundPointAt(e.clientX, e.clientY);
       if (p) for (const c of S.pick.claims) if (pointIn(c.ring, p.x, p.z)) { best = c; break; }
     }
     if (!best) { tip.hidden = true; return; }

@@ -29,7 +29,8 @@ DEFAULT_PORT = 8765
 MAX_BODY = 64 * 1024
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CITY = {"city": "Val-d'Or", "country": "Canada", "distance": 1500, "exaggeration": 1.5,
-                "building_exaggeration": None, "theme": "terracotta"}     # None: buildings follow the terrain
+                "building_exaggeration": None, "theme": "terracotta",     # None: buildings follow the terrain
+                "lat": 48.1020132, "lon": -77.7893768}                    # the model is centred on the Hôtel de Ville
 FINAL_APPROACH_AGL_M = 610.0          # 2 000 ft above ground
 
 
@@ -430,6 +431,8 @@ def main(argv=None) -> None:
     ap.add_argument("--cache", default="cache/3d-api", help="folder for built city models")
     ap.add_argument("--city", default=DEFAULT_CITY["city"], help="default city for the kiosk")
     ap.add_argument("--country", default=DEFAULT_CITY["country"])
+    ap.add_argument("--lat", type=float, default=DEFAULT_CITY["lat"], help="model centre latitude (default: Hôtel de Ville)")
+    ap.add_argument("--lon", type=float, default=DEFAULT_CITY["lon"], help="model centre longitude (default: Hôtel de Ville)")
     ap.add_argument("--distance", type=float, default=DEFAULT_CITY["distance"], help="model half-size in metres")
     ap.add_argument("--exaggeration", type=float, default=DEFAULT_CITY["exaggeration"], help="terrain exaggeration")
     ap.add_argument("--building-exaggeration", type=float, default=DEFAULT_CITY["building_exaggeration"],
@@ -447,7 +450,7 @@ def main(argv=None) -> None:
     cache = Path(args.cache).resolve()
     os.chdir(REPO_ROOT)          # create_map_poster reads themes/ and writes cache/ relative to the repo
     default = None if args.no_default_model else {
-        "city": args.city, "country": args.country, "distance": args.distance,
+        "city": args.city, "country": args.country, "lat": args.lat, "lon": args.lon, "distance": args.distance,
         "exaggeration": args.exaggeration, "building_exaggeration": args.building_exaggeration,
         "theme": args.theme,
     }
