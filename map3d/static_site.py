@@ -170,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-satellite", action="store_true",
                     help="do not fetch satellite tiles missing from the map (tiles stored in the map are always exported)")
     a = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):      # the pipeline prints warning signs; a Windows console cannot show them
+        stream.reconfigure(errors="replace")
     export_static(a.db, a.out, satellite=not a.no_satellite)
     return 0
 
