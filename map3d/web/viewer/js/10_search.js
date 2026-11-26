@@ -2,7 +2,7 @@
 const placeSearch = PlaceSearch.create({ THREE, scene, root, camera, controls, CFG, input: $('find'), list: $('findList'),
   onFlying: () => { controls.autoRotate = false; } });
 addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); placeSearch.open(); }
+  if (!EMBED && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); placeSearch.open(); }
 });
 // WASD moves the view over the ground (relative to where the camera looks), Q lowers it, E raises it; Shift is faster.
 const held = new Set(), fwd = new THREE.Vector3(), rgt = new THREE.Vector3(), mv = new THREE.Vector3();

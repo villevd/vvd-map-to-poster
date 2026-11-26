@@ -91,7 +91,8 @@ if (CFG.traffic && CFG.traffic.edges.length) {
       if (hl < len * 0.3) { hx = f.dx; hz = f.dz; hl = 1; }      // too close to the start of a road: use its direction
       hx /= hl; hz /= hl;
       const rx = -hz, rz = hx;                                   // right of travel
-      const tx = (f.x + r.x) / 2 + rx * LANE, tz = (f.z + r.z) / 2 + rz * LANE, ty = (f.y + r.y) / 2;
+      const lane = tc.edges[car.e].o ? 0 : LANE;                 // one-way roundabout ring: drive its centre line, not the inner lane
+      const tx = (f.x + r.x) / 2 + rx * lane, tz = (f.z + r.z) / 2 + rz * lane, ty = (f.y + r.y) / 2;
       let v = view[i];
       const ang = Math.atan2(hz, hx);
       if (!v || Math.hypot(tx - v.x, tz - v.z) > len * 3) v = view[i] = { x: tx, y: ty, z: tz, ang, pitch: 0 };
@@ -132,7 +133,47 @@ if (CFG.traffic && CFG.traffic.edges.length) {
       if (st !== lightShown[i]) { lightShown[i] = st; lights.setColorAt(i, LIGHT[st]); changed = true; }
     });
     if (changed) lights.instanceColor.needsUpdate = true;
+    // Following a car: shift camera and orbit target by however far the car moved, so orbit/zoom still work around it
+    if (followId >= 0) {
+      const v = view[followId];
+      if (!v) return;
+      followW.set(v.x, v.y, v.z); root.localToWorld(followW);
+      if (followHave) { followD.copy(followW).sub(followLast); camera.position.add(followD); controls.target.add(followD); }
+      followLast.copy(followW); followHave = true;
+    }
   };
+
+  // Click a car to follow it. A left click that did not drag picks the car nearest the cursor (in screen space, so
+  // small far-away cars are still easy to hit); a left drag (pan), Escape or a click on nothing stops following.
+  const followW = new THREE.Vector3(), followLast = new THREE.Vector3(), followD = new THREE.Vector3(), pickV = new THREE.Vector3();
+  let followId = -1, followHave = false, downX = 0, downY = 0;
+  const badge = document.createElement('div');
+  badge.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);padding:6px 12px;border-radius:14px;' +
+    'background:rgba(20,24,30,.85);color:#fff;font:13px system-ui,sans-serif;z-index:20;display:none;cursor:pointer';
+  badge.textContent = 'Following a car — click here or press Esc to stop';
+  document.body.appendChild(badge);
+  const stopFollow = () => { followId = -1; followHave = false; badge.style.display = 'none'; };
+  badge.onclick = stopFollow;
+  addEventListener('keydown', e => { if (e.key === 'Escape') stopFollow(); });
+  const dom = renderer.domElement;
+  dom.addEventListener('pointerdown', e => { if (e.button === 0) { downX = e.clientX; downY = e.clientY; } });
+  dom.addEventListener('pointerup', e => {
+    if (e.button !== 0) return;
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) { stopFollow(); return; }   // it was a pan
+    const r = dom.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    let best = -1, bd = 20;
+    for (let i = 0; i < view.length; i++) {
+      const v = view[i]; if (!v) continue;
+      pickV.set(v.x, v.y + L * 0.2, v.z); root.localToWorld(pickV);
+      if (Math.hypot(pickV.x - camera.position.x, pickV.z - camera.position.z) > PERF.cuts.car) continue;   // culled cars are invisible
+      pickV.project(camera);
+      if (pickV.z > 1) continue;
+      const d = Math.hypot((pickV.x * 0.5 + 0.5) * r.width - mx, (-pickV.y * 0.5 + 0.5) * r.height - my);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) { stopFollow(); return; }
+    followId = best; followHave = false; badge.style.display = 'block';
+  });
 } else {
   $('trafficRow').style.display = 'none';
   $('trafficSpeedRow').style.display = 'none';

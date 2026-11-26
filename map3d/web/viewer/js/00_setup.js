@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const CFG = JSON.parse(document.getElementById('cfg').textContent);
+// Embedded on another site (an iframe, e.g. villevd.ca/carte): ?embed=1 hides the developer panels, the search (it would
+// query the public Nominatim server from every visitor) and the cake; ?panel=0 also hides the settings panel.
+const QS = new URLSearchParams(location.search);
+const EMBED = QS.has('embed');
+if (EMBED) document.body.classList.add('embed');
+if (QS.get('panel') === '0') document.body.classList.add('nopanel');
 // When the GUI shows this page in a frame it moves the settings panel into its own sidebar; lookups then follow it there
 let PARENT_DOC = null;
 try { if (window.parent !== window) PARENT_DOC = window.parent.document; } catch (e) {}

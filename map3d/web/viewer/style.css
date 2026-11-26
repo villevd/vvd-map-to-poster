@@ -112,13 +112,18 @@
     color: var(--text); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
     border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); }
   #ugTip small { opacity: .6; }
-  #ugTopLegend { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; width: min(360px, calc(100vw - 24px));
+  #ugTopLegend { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; width: max-content; max-width: calc(100vw - 24px);
     padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.35; color: var(--text);
     background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
     border: 1px solid color-mix(in srgb, var(--text) 30%, transparent); }
   #ugTopLegend[hidden], #ugTopLegend .ugTopBody[hidden] { display: none; }
   #ugTopLegend .ugTopHead { background: none; border: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 0; }
-  #ugTopLegend .ugTopRow { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+  #ugTopLegend .ugTopBody { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; }
+  #ugTopLegend .ugTopRow { display: flex; gap: 8px; align-items: flex-start; max-width: 300px; }
   #ugTopLegend .ugTopRow i { flex: none; width: 12px; height: 12px; margin-top: 3px; border-radius: 3px; }
   #ugTopLegend .ugTopRow span { display: flex; flex-direction: column; }
   #ugTopLegend .ugTopRow small { opacity: .7; font-size: 11px; }
+
+  /* Embedded in another site (?embed=1): developer panels stay out of the visitor's way */
+  body.embed #perfHud, body.embed #activity, body.embed #perf, body.embed #cakeBox, body.embed #findBox { display: none !important; }
+  body.nopanel #ui { display: none; }

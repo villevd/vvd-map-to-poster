@@ -262,25 +262,89 @@ def _wfs(session, url, type_name, bbox, count, srs_bbox_order="latlon", extra=No
     return _get_json(session, url, params, timeout=timeout).get("features", [])
 
 
+SIGEOM_LAYERS = (("deposits", "Metallic_deposits"), ("projects", "Mines_projects_en"),
+                 ("nonmetal", "Non_metal_deposits"), ("drill", "Diamond_drillings"),
+                 ("esker", "Quat_Generalized_eskers"))
+
+
+def _feat_box(feat):
+    """(west, south, east, north) of a GeoJSON feature, or None."""
+    xs, ys = [], []
+
+    def walk(c):
+        if c and isinstance(c[0], (int, float)):
+            xs.append(c[0]); ys.append(c[1])
+        else:
+            for k in c or []:
+                walk(k)
+    walk((feat.get("geometry") or {}).get("coordinates"))
+    return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+
+def _feat_key(feat):
+    """Identity of a feature. The server's own ids change on every request, so hash the content instead."""
+    return hashlib.sha1(json.dumps([feat.get("geometry"), feat.get("properties")], sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _store_path(cache_dir) -> Path:
+    return Path(cache_dir) / "underground" / "sigeom_store.json"
+
+
+def _store_load(cache_dir) -> dict:
+    """The permanent SIGEOM store: every feature ever downloaded, per layer, plus the boxes already fully asked for.
+    No expiry. Built once from any good answers the old per-box cache files still hold."""
+    path = _store_path(cache_dir)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    store = {"layers": {k: {} for k, _ in SIGEOM_LAYERS}, "covered": []}
+    for old in sorted((Path(cache_dir) / "underground").glob("sigeom_*.json")):
+        try:
+            for key, feats in (json.loads(old.read_text(encoding="utf-8")).get("v") or {}).items():
+                if key in store["layers"]:
+                    for f in feats:
+                        store["layers"][key][_feat_key(f)] = f
+        except (OSError, ValueError, AttributeError):
+            pass
+    return store
+
+
+def _store_save(cache_dir, store) -> None:
+    _cache_write(_store_path(cache_dir), store)
+
+
 def _sigeom(session, bbox, cache_dir, log):
+    """SIGEOM features around ``bbox`` from the permanent store. The server is only asked for a box the store has
+    not fully seen; if it is down (it serves a maintenance page now and then) the store answers alone, and a failed
+    answer is never remembered as 'nothing here'."""
     if not _in_box(QUEBEC_BOX, *bbox):
         return None
-
-    def fetch():
+    store = _store_load(cache_dir)
+    box = [round(v, 3) for v in bbox]
+    covered = any(c[0] <= box[0] and c[1] <= box[1] and c[2] >= box[2] and c[3] >= box[3] for c in store["covered"])
+    if not covered:
         def one(item):
             key, name = item
             try:
                 return key, _wfs(session, SIGEOM_WFS, f"SGM_EN:{name}", bbox,
                                  MAX_DRILLHOLES if key == "drill" else MAX_SITES)
             except Exception as e:
-                log(f"⚠ SIGEOM {name} unavailable: {e}")
-                return key, []
-        layers = (("deposits", "Metallic_deposits"), ("projects", "Mines_projects_en"),
-                  ("nonmetal", "Non_metal_deposits"), ("drill", "Diamond_drillings"),
-                  ("esker", "Quat_Generalized_eskers"))
-        with ThreadPoolExecutor(len(layers)) as pool:
-            return dict(pool.map(one, layers))
-    return _cached(cache_dir, "sigeom", ("v2",) + tuple(round(v, 3) for v in bbox), fetch, log)
+                log(f"⚠ SIGEOM {name} unavailable ({type(e).__name__}): using the stored copy")
+                return key, None
+        with ThreadPoolExecutor(len(SIGEOM_LAYERS)) as pool:
+            got = dict(pool.map(one, SIGEOM_LAYERS))
+        for key, feats in got.items():
+            for f in feats or []:
+                store["layers"].setdefault(key, {})[_feat_key(f)] = f
+        if all(v is not None for v in got.values()):
+            store["covered"].append(box)
+        _store_save(cache_dir, store)
+    out = {}
+    for key, _ in SIGEOM_LAYERS:
+        out[key] = [f for f in store["layers"].get(key, {}).values()
+                    if (b := _feat_box(f)) and _in_box(bbox, *b)]
+    return out if any(out.values()) else None
 
 
 def _gestim(session, bbox, cache_dir, log):

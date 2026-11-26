@@ -564,7 +564,7 @@ function ugInit() {
   function describe(hit) {
     const f = v => v === null || v === undefined || v === '' ? '—' : v;
     if (hit.e) return `<b>${hit.e.kind}</b><br>Sand and gravel ridge; carries groundwater<br>Line mapped, ridge size schematic<br><small>${hit.e.source}</small>`;
-    if (hit.s) { const s = hit.s; return `<b>${s.name}</b><br>${f(s.kind)}${s.status ? ' · ' + s.status : ''}<br>${s.commodity ? s.commodity + '<br>' : ''}Depth: ${s.depth_m ? Math.round(s.depth_m) + ' m' : 'not recorded'}${s.year ? '<br>Found ' + s.year : ''}<br><small>${s.source}</small>`; }
+    if (hit.s) { const s = hit.s; return `<b>${s.name}</b><br>${f(s.kind)}${s.status ? ' · ' + s.status : ''}<br>${s.commodity ? s.commodity + '<br>' : ''}${s.depth_m ? 'Depth: ' + Math.round(s.depth_m) + ' m' + (s.depth_source ? ' (' + s.depth_source + ')' : '') + '<br>' : ''}${s.year ? '<br>Found ' + s.year : ''}<br><small>${s.source}</small>`; }
     if (hit.h) { const h = hit.h; return `<b>Drill hole ${h.id}</b><br>${Math.round(h.length_m)} m long · plunge ${Math.round(h.plunge)}° · azimuth ${Math.round(h.azimuth)}°${h.year ? '<br>Drilled ' + h.year : ''}<br><small>${h.source}</small>`; }
     const c = hit.c; return `<b>${c.kind} ${c.id}</b><br>${c.status}<br>${c.area_ha ? Math.round(c.area_ha) + ' ha · ' : ''}expires ${f(c.expires)}<br><small>${c.source}</small>`;
   }
@@ -611,7 +611,9 @@ function ugInit() {
       // label keeps its proportions and its steady on-screen size
       let h = Math.min(d, H * 3) * k * sp.userData.size / root.scale.y;
       if (sp.userData.cap !== undefined) h = Math.min(h, sp.userData.cap);   // shrink to fit between neighbouring ticks (local units)
-      sp.scale.set(h * sp.userData.aspect, h, 1);
+      // only the height is stretched by root.scale.y (the sprite's width is not), so the width gets it back: otherwise
+      // the text is squeezed sideways as the exaggeration grows
+      sp.scale.set(h * root.scale.y * sp.userData.aspect, h, 1);
     }
     if (S.pulse) for (const o of S.pulse) o.scale.setScalar(pulse);   // a cached list: no tree walk per frame
   };

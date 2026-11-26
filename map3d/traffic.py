@@ -184,11 +184,13 @@ def build_traffic(roads, signals, stop_signs, ground_z, lift: float, side: float
 
     # Roundabouts: one-way, counter-clockwise (clockwise for left-hand traffic), taken slowly
     n_round = 0
+    ring_nodes: set[int] = set()
     for i, centre in find_roundabouts(edge_ends, edge_xy, edge_tagged).items():
         ccw = _turning(edge_xy[i], centre) > 0
         edges[i]["o"] = 1
         edges[i]["d"] = 0 if ccw == right_hand else 1       # the one direction cars may drive this edge in
         edges[i]["v"] = min(edges[i]["v"], ROUNDABOUT_SPEED)
+        ring_nodes.update(edge_ends[i])
         n_round += 1
     n_heavy = sum(1 for e in edges if e.get("h"))
 
@@ -199,6 +201,7 @@ def build_traffic(roads, signals, stop_signs, ground_z, lift: float, side: float
     # Attach each signal / stop sign to the nearest junction. Signals win over stop signs at the same junction.
     tree = cKDTree(nxy)
     node_ctrl = np.full(len(nxy), -1, dtype=np.int64)
+    # roundabouts have no signals or stop signs: cars on the ring never stop, entering cars give way
     ctrls: list[dict] = []
 
     def attach(points, kind: str) -> int:
@@ -207,7 +210,7 @@ def build_traffic(roads, signals, stop_signs, ground_z, lift: float, side: float
         dist, idx = tree.query(np.asarray(points, dtype=np.float64)[:, :2], k=1, distance_upper_bound=CONTROL_SNAP)
         count = 0
         for d, i in zip(dist, idx):
-            if not np.isfinite(d) or i >= len(nxy) or node_ctrl[i] >= 0:
+            if not np.isfinite(d) or i >= len(nxy) or node_ctrl[i] >= 0 or int(i) in ring_nodes:
                 continue
             ctrl: dict = {"k": kind}
             if kind == "signal":

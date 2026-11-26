@@ -47,7 +47,7 @@ const elevScale = (() => {
   function mineLines(c) {
     return MINES.map(s => ({ s, d: Math.hypot(s.x - c.x, -s.y - c.z) }))
       .sort((a, b) => a.d - b.d).slice(0, MINE_N)
-      .map(({ s }) => clip(s.name) + ' · ' + (s.depth_m > 0 ? Math.round(s.depth_m) + ' m' : 'depth unknown'));
+      .map(({ s }) => s.depth_m > 0 ? clip(s.name) + ' · ' + Math.round(s.depth_m) + ' m' : clip(s.name));
   }
   const lh = H * 0.045, tickLen = H * 0.035;   // label height, tick length (scene units)
   const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => ({ x: sx * H, z: sz * H, sx, sz }));

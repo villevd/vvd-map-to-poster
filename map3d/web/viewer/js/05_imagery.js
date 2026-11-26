@@ -84,7 +84,7 @@ function satBitmap(z, x, y) {
   satBitmaps.set(k, withTileSlot(async () => {
     // A baked map serves its picture itself: the tile is in the map, or the GUI fetches it once and keeps it on this computer
     if (CFG.satBase) {
-      const r = await fetch(`${CFG.satBase}${z}/${x}/${y}`);
+      const r = await fetch(`${CFG.satBase}${z}/${x}/${y}${CFG.satExt || ''}`);
       if (!r.ok) return null;
       const blob = await r.blob();
       if (blob.size < 32) return null;
@@ -310,7 +310,7 @@ async function loadGroup(tile, lod) {
     if (lv.cfg.b64) src = lv.cfg.b64;
     else if (CFG.blobBase && lv.cfg.id) {        // baked map: the tile is fetched from the map (compressed, as stored)
       actUpdate(actId, `${what} · downloading`);
-      const r = await fetch(CFG.blobBase + encodeURIComponent(lv.cfg.id), { cache: 'no-store' });
+      const r = await fetch(CFG.blobBase + encodeURIComponent(lv.cfg.id) + (CFG.blobExt || ''), CFG.static ? undefined : { cache: 'no-store' });
       if (!r.ok) throw new Error(`tile ${lv.cfg.id}: HTTP ${r.status}`);
       src = await r.arrayBuffer();
     } else src = el.textContent.trim();

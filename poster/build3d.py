@@ -13,15 +13,36 @@ from .settings import CACHE_DIR_PATH, FILE_ENCODING, THEMES_DIR
 from .themes import THEME, get_available_themes
 
 
+_MAP3D_DIR = Path(__file__).resolve().parent.parent / "map3d"
+
+
+def _code_stamp(*patterns: str) -> str:
+    """Fingerprint of the 3D source files matching ``patterns`` (relative to map3d/)."""
+    h = hashlib.sha1()
+    files = sorted({f for pat in patterns for f in _MAP3D_DIR.glob(pat) if f.suffix in (".py", ".js")})
+    for f in files:
+        h.update(f.relative_to(_MAP3D_DIR).as_posix().encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
+
 @functools.lru_cache(maxsize=1)
 def _map3d_stamp() -> str:
-    """Fingerprint of the 3D code: cached models are reused only while the code that made them is unchanged."""
-    h = hashlib.sha1()
-    for f in sorted((Path(__file__).resolve().parent.parent / "map3d").glob("*")):
-        if f.suffix in (".py", ".js"):
-            h.update(f.name.encode())
-            h.update(f.read_bytes())
-    return h.hexdigest()[:10]
+    """Fingerprint of all the 3D code: a finished model is reused only while the code that made it is unchanged."""
+    return _code_stamp("*", "data/*")
+
+
+@functools.lru_cache(maxsize=1)
+def _data_stamp() -> str:
+    """Fingerprint of the code that turns downloads into map data. Editing the scene, traffic or viewer code leaves
+    the processed data valid, so a rebake after such an edit skips the download parsing."""
+    return _code_stamp("data/*", "geo.py", "overture.py")
+
+
+@functools.lru_cache(maxsize=1)
+def _dem_stamp() -> str:
+    """Fingerprint of the code that builds the elevation grid."""
+    return _code_stamp("terrain.py", "geo.py")
 
 
 def build_scene_3d(
@@ -139,7 +160,7 @@ def _build_scene_3d_impl(
     providers = Providers(
         osm_features=osm_features, osm_graph=osm_graph, overture=use_overture, cache_dir=CACHE_DIR_PATH
     )
-    data_key = "city3d_data_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(total),
+    data_key = "city3d_data_" + _cache_digest(_data_stamp(), round(float(lat), 5), round(float(lon), 5), float(total),
                                                bool(include_trees), bool(include_railways), bool(include_traffic),
                                                bool(use_overture))
     data = _cache_try_get(data_key)
@@ -161,7 +182,7 @@ def _build_scene_3d_impl(
         )
 
     if include_terrain:
-        dem_key = "city3d_dem_" + _cache_digest(_map3d_stamp(), round(float(lat), 5), round(float(lon), 5), float(total))
+        dem_key = "city3d_dem_" + _cache_digest(_dem_stamp(), round(float(lat), 5), round(float(lon), 5), float(total))
         dem = _cache_try_get(dem_key)
         try:
             if dem is None:
