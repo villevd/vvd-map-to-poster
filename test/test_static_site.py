@@ -28,6 +28,18 @@ def test_export_writes_plain_files(tmp_path):
     assert cfg["static"] is True and cfg["blobBase"] == "blob/" and cfg["satBase"] == "sat/"
 
 
+def test_big_tiles_are_cut_in_parts(tmp_path):
+    db = _bake(tmp_path)
+    out = static_site.export_static(db, tmp_path / "site", log=lambda *_: None, part_bytes=10)
+    raw = zlib.compress(b"tile0")
+    assert len(raw) > 10
+    joined = b"".join((out / "blob" / f"b0.bin.{i}").read_bytes() for i in range(2))
+    assert joined == raw and not (out / "blob" / "b0.bin").exists()
+    html = (out / "index.html").read_text(encoding="utf-8")
+    cfg = json.loads(re.search(r'id="cfg">(.*?)</script>', html, re.S).group(1))
+    assert cfg["blobParts"]["b0"] == 2
+
+
 def test_export_without_satellite_lets_the_viewer_use_the_source(tmp_path):
     db = _bake(tmp_path)
     out = static_site.export_static(db, tmp_path / "site", satellite=False, log=lambda *_: None)

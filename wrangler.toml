@@ -1,0 +1,13 @@
+# villevd.ca/carte: the 3D map, served as static files (no Worker code).
+# The bundle comes from `python -m map3d.static_site <map.db> site/carte` and is not kept in git (see docs/deploy-carte.md).
+# Files live under site/carte/ so that the URL path /carte/... maps straight onto them.
+name = "vvd-carte"
+compatibility_date = "2026-11-11"
+workers_dev = true
+routes = [
+  { pattern = "villevd.ca/carte*", zone_name = "villevd.ca" },
+]
+
+[assets]
+directory = "./site"
+html_handling = "auto-trailing-slash"

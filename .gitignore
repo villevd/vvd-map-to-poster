@@ -34,3 +34,7 @@ htmlcov/
 .coverage
 .pytest_cache/
 /posters
+
+# Built 3D map bundle for villevd.ca/carte (see docs/deploy-carte.md)
+/site/carte/
+carte-bundle.zip

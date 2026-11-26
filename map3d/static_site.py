@@ -32,6 +32,7 @@ from . import satellite as satellite_mod
 
 VENDOR = Path(__file__).with_name("web") / "vendor" / "three"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+PART_BYTES = 20 * 1024 * 1024    # tiles bigger than this are cut in parts (Cloudflare allows 25 MiB per file)
 
 README = """\
 Carte 3D - static export
@@ -94,7 +95,8 @@ def _stream_rows(db: Path, sql: str):
             return
 
 
-def export_static(db_path: str | Path, out_dir: str | Path, satellite: bool = True, log=print) -> Path:
+def export_static(db_path: str | Path, out_dir: str | Path, satellite: bool = True, log=print,
+                  part_bytes: int = PART_BYTES) -> Path:
     """Write the static site for a baked map into ``out_dir`` (created; an existing ``index.html`` is replaced)."""
     from . import viewer                        # heavy (the viewer template)
 
@@ -109,13 +111,23 @@ def export_static(db_path: str | Path, out_dir: str | Path, satellite: bool = Tr
 
     log("Mesh tiles ...")
     n = size = 0
+    parts: dict[str, int] = {}
     for bid, data in _stream_rows(db, "SELECT id, data FROM blobs"):
         if not _SAFE_ID.match(bid):
             raise ValueError(f"unsafe tile id {bid!r}")
-        _write(out / "blob" / f"{bid}.bin", bytes(data))
+        data = bytes(data)
+        if len(data) > part_bytes:              # the viewer joins the parts again (cfg.blobParts)
+            pieces = [data[i:i + part_bytes] for i in range(0, len(data), part_bytes)]
+            for i, piece in enumerate(pieces):
+                _write(out / "blob" / f"{bid}.bin.{i}", piece)
+            parts[bid] = len(pieces)
+        else:
+            _write(out / "blob" / f"{bid}.bin", data)
         n += 1
         size += len(data)
-    log(f"  {n} tiles, {size / 1_048_576:.0f} MB")
+    if parts:
+        cfg["blobParts"] = parts
+    log(f"  {n} tiles, {size / 1_048_576:.0f} MB" + (f" ({len(parts)} cut in parts)" if parts else ""))
 
     log("Satellite tiles ...")
     stored = 0

@@ -310,9 +310,15 @@ async function loadGroup(tile, lod) {
     if (lv.cfg.b64) src = lv.cfg.b64;
     else if (CFG.blobBase && lv.cfg.id) {        // baked map: the tile is fetched from the map (compressed, as stored)
       actUpdate(actId, `${what} · downloading`);
-      const r = await fetch(CFG.blobBase + encodeURIComponent(lv.cfg.id) + (CFG.blobExt || ''), CFG.static ? undefined : { cache: 'no-store' });
-      if (!r.ok) throw new Error(`tile ${lv.cfg.id}: HTTP ${r.status}`);
-      src = await r.arrayBuffer();
+      const url = CFG.blobBase + encodeURIComponent(lv.cfg.id) + (CFG.blobExt || ''), opt = CFG.static ? undefined : { cache: 'no-store' };
+      const nParts = (CFG.blobParts && CFG.blobParts[lv.cfg.id]) || 0;   // static sites: a tile over the host's file size limit is stored in parts
+      const get = async u => { const r = await fetch(u, opt); if (!r.ok) throw new Error(`tile ${lv.cfg.id}: HTTP ${r.status}`); return r.arrayBuffer(); };
+      if (nParts) {
+        const bufs = await Promise.all(Array.from({ length: nParts }, (_, i) => get(`${url}.${i}`)));
+        const whole = new Uint8Array(bufs.reduce((n, b) => n + b.byteLength, 0));
+        let at = 0; for (const b of bufs) { whole.set(new Uint8Array(b), at); at += b.byteLength; }
+        src = whole.buffer;
+      } else src = await get(url);
     } else src = el.textContent.trim();
     const size = typeof src === 'string' ? src.length : src.byteLength;
     LOAD.bytes += size;

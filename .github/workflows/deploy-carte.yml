@@ -1,0 +1,45 @@
+name: Deploy carte (villevd.ca/carte)
+
+# Manual only. The map is built on a computer (it needs the downloaded city data), packed as carte-bundle.zip and attached
+# to a GitHub release; this workflow publishes that bundle to Cloudflare. See docs/deploy-carte.md.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release holding carte-bundle.zip"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-carte
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare
+    # GitHub-hosted on purpose: this repository is public, and a self-hosted runner must never run code from a public repo.
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          gh release download "$TAG" --pattern carte-bundle.zip --dir "$RUNNER_TEMP"
+          mkdir -p site/carte
+          unzip -q "$RUNNER_TEMP/carte-bundle.zip" -d site/carte
+          test -f site/carte/index.html
+          echo "files: $(find site/carte -type f | wc -l)  (Cloudflare limit: 20000 on the free plan)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Deploy
+        run: npx --yes wrangler@4 deploy
