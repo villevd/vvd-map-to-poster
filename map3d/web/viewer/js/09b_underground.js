@@ -314,7 +314,9 @@ function ugInit() {
     // drill holes: one merged mesh of thin prisms, collar at the ground, going down along the real azimuth and plunge
     const holes = UGD.drillholes || [];
     if (holes.length) {
-      const rr = Math.max(T * 0.0009, 0.8), pos = [], idx = [];
+      const rr = Math.max(T * 0.0009, 0.8), pos = [], idx = [], col = [];
+      // colour by real depth: pale near the surface, deep blue at the deepest drilling (scale: 0 to the deepest hole)
+      const cNear = new THREE.Color('#e8fdff'), cFar = new THREE.Color('#0a6fd6'), maxD = UGD.max_depth_m || 600;
       const dir = new THREE.Vector3(), side = new THREE.Vector3(), up = new THREE.Vector3();
       holes.forEach((h, k) => {
         const x = h.x, z = -h.y, y = surface(x, z, fallback);
@@ -327,14 +329,16 @@ function ugInit() {
         for (const q of [0, 1]) {
           const cx = x + dir.x * q, cy = y + dir.y * q, cz = z + dir.z * q;
           pos.push(cx + side.x, cy + side.y, cz + side.z, cx + up.x, cy + up.y, cz + up.z, cx - side.x, cy - side.y, cz - side.z, cx - up.x, cy - up.y, cz - up.z);
+          const dm = Math.min(1, Math.max(0, -Math.sin(pl) * h.length_m * q / maxD)), c = cNear.clone().lerp(cFar, dm);
+          for (let v = 0; v < 4; v++) col.push(c.r, c.g, c.b);
         }
         for (let e = 0; e < 4; e++) { const a = base + e, b = base + (e + 1) % 4, c = a + 4, d = b + 4; idx.push(a, c, b, b, c, d); }
         pick.drill.push({ x, y, z, h, end: new THREE.Vector3(x + dir.x, y + dir.y, z + dir.z) });
       });
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
-      const m = new THREE.Mesh(g, cutMaterial(new THREE.MeshBasicMaterial({ color: 0x3df2ff, side: THREE.DoubleSide })));
-      m.userData.kind = 'drill'; f.add(m); addGhost(f, m, 'drill');
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx);
+      const m = new THREE.Mesh(g, cutMaterial(new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide })));
+      m.userData.kind = 'drill'; f.add(m); addGhost(f, m, 'drill', 0x3df2ff);
     }
     // claims: a faint curtain from the surface to the floor, and a bright outline on the ground
     const claims = UGD.claims || [];
@@ -544,7 +548,7 @@ function ugInit() {
     const row = (color, label, what) => `<div class="ugTopRow"><i style="background:${color}"></i><span><b>${label}</b><small>${what}</small></span></div>`;
     const top = [];
     if (nS) top.push(row('#ffd23a', `${nS} mines &amp; deposits`, 'Beacons at the surface, coloured by main commodity (gold, copper, zinc…). A solid shaft means the depth is known; a fading one means it is not.'));
-    if (nD) top.push(row('#3df2ff', `${nD} drill holes`, 'Cyan tubes going down from the ground in their real direction and angle' + (UGD.max_depth_m ? `; deepest ${Math.round(UGD.max_depth_m).toLocaleString()} m` : '') + '.'));
+    if (nD) top.push(row('linear-gradient(#e8fdff, #0a6fd6)', `${nD} drill holes`, 'Tubes going down along their real direction and angle. Pale near the surface, deep blue at depth (0 to ' + (UGD.max_depth_m ? Math.round(UGD.max_depth_m).toLocaleString() : '?') + ' m).'));
     if (nC) top.push(row('#ffd45e', `${nC} mining claims`, 'Yellow outlines on the ground with posts going down. A claim is an area registered for mineral exploration, not a mine.'));
     if (nE) top.push(row('#ffe27a', `${nE} eskers`, 'Pale yellow line on the ground with a buried sand-and-gravel ridge under it, left by old rivers under ice. They carry groundwater.'));
     if (UGD.water_table) top.push(row('#35a8ff', 'Water table', 'Blue sheet: estimated depth where the ground is saturated with water. An estimate, not a measurement.'));
