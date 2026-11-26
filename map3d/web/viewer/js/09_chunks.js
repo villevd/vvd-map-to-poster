@@ -61,6 +61,7 @@ async function loadChunk(c) {
     try {
       r = await workRun('json', { url, init: { cache: 'no-store' } }, [], (stage) => actUpdate(actId, `cell ${c.i}, ${c.j} · ${stage}`));
       actEnd(actId, r.status === 200);
+      netAdd('Edge chunk (local server)', r.bytes === undefined ? null : r.bytes);
     } catch (e) { actEnd(actId, false); throw e; }
     if (r.status === 404) throw new TypeError('no chunk route');   // an older GUI process without the route
     if (r.status !== 200) throw new Error(`HTTP ${r.status}: ${r.text || ''}`);

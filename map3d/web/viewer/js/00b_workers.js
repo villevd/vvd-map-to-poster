@@ -60,9 +60,10 @@ async function tileParseCore(d, stage) {
 async function jsonParseCore(d, stage) {
   stage('downloading');
   const r = await fetch(d.url, d.init);
-  if (!r.ok) return { res: { status: r.status, text: (await r.text()).slice(0, 200) }, transfer: [] };
+  const h = r.headers.get('content-length'), bytes = h === null || h === '' ? null : (Number(h) || 0);   // for the network panel
+  if (!r.ok) return { res: { status: r.status, text: (await r.text()).slice(0, 200), bytes }, transfer: [] };
   stage('parsing');
-  return { res: { status: r.status, json: await r.json() }, transfer: [] };
+  return { res: { status: r.status, json: await r.json(), bytes }, transfer: [] };
 }
 
 const WORK = {

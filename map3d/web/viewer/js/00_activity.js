@@ -13,6 +13,10 @@ function actLabel(url) {
     m = /\/tile\/(\d+)\/(\d+)\/(\d+)/.exec(u);
     return ['Satellite tile', m ? `z${m[1]} · ${m[3]}/${m[2]}` : ''];
   }
+  if (/(^|\/)sat\/\d+\/\d+\/\d+/.test(u)) {
+    m = /(^|\/)sat\/(\d+)\/(\d+)\/(\d+)/.exec(u);
+    return ['Satellite tile', m ? `z${m[2]} · ${m[3]}/${m[4]}` : ''];
+  }
   if (/\/api\/chunk/.test(u)) {
     m = /[?&]i=(-?\d+)&j=(-?\d+)/.exec(u);
     return ['Edge chunk (local server)', m ? `cell ${m[1]}, ${m[2]}` : ''];
@@ -49,17 +53,42 @@ function actEnd(id, ok = true) {
   actDraw();
 }
 
-// Requests made with fetch are listed by what they are for; the page's own code does not need to change
+// Bytes that crossed the network, per kind of request. Sized from Content-Length (what the server sent, compressed if
+// the host compresses it); a response without that header is counted as a request but not as bytes.
+const NET = { req: 0, bytes: 0, unsized: 0, kinds: new Map() };
+function netAdd(kind, bytes) {
+  let k = NET.kinds.get(kind); if (!k) NET.kinds.set(kind, k = { n: 0, bytes: 0 });
+  k.n++; NET.req++;
+  if (bytes === null || bytes === undefined) NET.unsized++;
+  else { k.bytes += bytes; NET.bytes += bytes; }
+}
+/** Content-Length of a response as a number, or null when the server did not send one. */
+function netSize(r) { const h = r.headers && r.headers.get('content-length'); return h === null || h === undefined || h === '' ? null : (Number(h) || 0); }
+function fmtBytes(b) { return b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`; }
+/** The panel's network lines: the total, then each kind (largest first). */
+function netLines() {
+  if (!NET.req) return ['Network: nothing fetched yet'];
+  const kinds = [...NET.kinds.entries()].sort((a, b) => b[1].bytes - a[1].bytes || b[1].n - a[1].n)
+    .map(([k, v]) => `${k.replace(/ \(.*\)$/, '')} ${fmtBytes(v.bytes)} (${v.n})`);
+  return [`Network: ${fmtBytes(NET.bytes)} in ${NET.req} request${NET.req > 1 ? 's' : ''}${NET.unsized ? ` · ${NET.unsized} of unknown size` : ''}`,
+    kinds.join(' · ')];
+}
+
+// Requests made with fetch are listed by what they are for; the page's own code does not need to change.
+// Chunk requests are counted by their caller (they run in a worker, which this wrapper does not see).
 (function actWatchFetch() {
   const orig = window.fetch;
   if (typeof orig !== 'function') return;
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const [label, detail] = actLabel(url);
-    const id = actStart(label, detail);
+    // A model tile has its own row (loadGroup, which also says what it is doing): only its bytes are counted here.
+    // A chunk is counted by its caller (it runs in a worker, which this wrapper does not see).
+    const modelTile = /(^|\/)blob\//.test(url), chunk = /\/api\/chunk/.test(url);
+    const id = modelTile ? 0 : actStart(label, detail);
     return orig.call(this, input, init).then(
-      r => { actEnd(id, r.ok); return r; },
-      e => { actEnd(id, false); throw e; });
+      r => { if (!modelTile) actEnd(id, r.ok); if (!chunk) netAdd(modelTile ? 'Model tile' : label, netSize(r)); return r; },
+      e => { if (!modelTile) actEnd(id, false); throw e; });
   };
 })();
 

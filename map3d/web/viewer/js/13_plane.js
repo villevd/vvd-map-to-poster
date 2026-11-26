@@ -188,6 +188,7 @@ ACT.info = () => {
   return [
     `Tiles: ${c.ready}/${c.total} ready · ${c.busy} loading · ${wanted.size} queued${c.failed ? ` · ${c.failed} failed` : ''}`,
     WORK.info(),
-    `Data: ${(LOAD.bytes / 1048576).toFixed(1)} MB unpacked · ${LOAD.retries} retries · on screen ${c.shown}/${c.tiles}`,
+    `Tile data: ${(LOAD.bytes / 1048576).toFixed(1)} MB · ${LOAD.retries} retries · on screen ${c.shown}/${c.tiles}`,
+    ...netLines(),
   ];
 };
