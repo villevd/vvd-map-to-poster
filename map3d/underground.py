@@ -152,6 +152,23 @@ def _simplify_ring(ring, tol=2.0):
     return [[round(x, 1), round(y, 1)] for x, y in pts]
 
 
+def _clip_ring(ring, half, tol=2.0):
+    """The part of a ring inside the model's square (the block of earth ends there), simplified, as [x, y] pairs."""
+    try:
+        import shapely.geometry as sg
+        poly = sg.Polygon(ring).buffer(0).intersection(sg.box(-half, -half, half, half))
+        if poly.is_empty:
+            return None
+        if poly.geom_type != "Polygon":      # a claim cut in two by the edge: keep the larger piece
+            poly = max((g for g in getattr(poly, "geoms", []) if g.geom_type == "Polygon"), key=lambda g: g.area, default=None)
+            if poly is None:
+                return None
+        poly = poly.simplify(tol, preserve_topology=True)
+        return [[round(x, 1), round(y, 1)] for x, y in poly.exterior.coords]
+    except Exception:
+        return None
+
+
 def _in_box(box, west, south, east, north):
     return not (east < box[0] or west > box[2] or north < box[1] or south > box[3])
 
@@ -259,10 +276,11 @@ def _sigeom(session, bbox, cache_dir, log):
                 log(f"⚠ SIGEOM {name} unavailable: {e}")
                 return key, []
         layers = (("deposits", "Metallic_deposits"), ("projects", "Mines_projects_en"),
-                  ("nonmetal", "Non_metal_deposits"), ("drill", "Diamond_drillings"))
+                  ("nonmetal", "Non_metal_deposits"), ("drill", "Diamond_drillings"),
+                  ("esker", "Quat_Generalized_eskers"))
         with ThreadPoolExecutor(len(layers)) as pool:
             return dict(pool.map(one, layers))
-    return _cached(cache_dir, "sigeom", tuple(round(v, 3) for v in bbox), fetch, log)
+    return _cached(cache_dir, "sigeom", ("v2",) + tuple(round(v, 3) for v in bbox), fetch, log)
 
 
 def _gestim(session, bbox, cache_dir, log):
@@ -345,6 +363,34 @@ def sites_from_sigeom(raw, frame) -> list[dict]:
     return out
 
 
+def eskers_from_sigeom(raw, frame) -> list[dict]:
+    """Esker centre lines (glaciofluvial sand and gravel ridges, the aquifers of the Abitibi) in local metres,
+    cut to the model's square. Only the line is data: how wide and deep the esker is under it is not."""
+    out = []
+    try:
+        import shapely.geometry as sg
+    except Exception:
+        return out
+    box = sg.box(-frame.half, -frame.half, frame.half, frame.half)
+    for feat in (raw or {}).get("esker", []):
+        geom, props = feat.get("geometry") or {}, feat.get("properties") or {}
+        parts = geom.get("coordinates", []) if geom.get("type") == "MultiLineString" else             [geom["coordinates"]] if geom.get("type") == "LineString" else []
+        for part in parts:
+            if len(part) < 2:
+                continue
+            xs, ys = frame.to_xy([c[0] for c in part], [c[1] for c in part])
+            line = sg.LineString(list(zip(xs, ys))).intersection(box)
+            if line.is_empty:
+                continue
+            for piece in getattr(line, "geoms", [line]):
+                if piece.geom_type != "LineString" or piece.length < 5:
+                    continue
+                piece = piece.simplify(3.0)
+                out.append({"id": str(props.get("ESK_NO_SEQ") or ""), "kind": props.get("ESK_FORME_FLUVI_EN") or "Esker",
+                            "line": [[round(x, 1), round(y, 1)] for x, y in piece.coords], "source": "sigeom"})
+    return out[:60]
+
+
 def drillholes_from_sigeom(raw, frame) -> list[dict]:
     out = []
     for feat in (raw or {}).get("drill", []):
@@ -386,7 +432,7 @@ def claims_from_gestim(raw, frame) -> list[dict]:
             props = feat.get("properties") or {}
             for ring in _rings(feat.get("geometry")):
                 xs, ys = frame.to_xy([c[0] for c in ring], [c[1] for c in ring])
-                simple = _simplify_ring(list(zip(xs, ys)))
+                simple = _clip_ring(list(zip(xs, ys)), frame.half)
                 if not simple or len(simple) < 4:
                     continue
                 out.append({
@@ -514,7 +560,8 @@ def fetch_underground(frame, cache_dir, osm_features=None, log=print, session=No
     if claims:
         used.append("gestim")
 
-    if not (geology["surface"] or sites or drill or claims):
+    eskers = eskers_from_sigeom(sig, frame)
+    if not (geology["surface"] or sites or drill or claims or eskers):
         return None
 
     depths = [d["length_m"] for d in drill] + [s["depth_m"] for s in sites if s.get("depth_m")]
@@ -525,6 +572,11 @@ def fetch_underground(frame, cache_dir, osm_features=None, log=print, session=No
         "sites": sites,
         "drillholes": drill,
         "claims": claims,
+        "eskers": eskers,
+        # No open measured groundwater levels exist for most places: the water table is an estimate (a subdued copy
+        # of the ground a few metres down) and the viewer says so.
+        "water_table": {"depth_m": 3.0, "provenance": "estimate",
+                        "note": "Estimated: follows the ground, about 3 m down. Not measured."},
         "max_depth_m": round(max(depths), 1) if depths else None,
         "sources": used,
         "credits": [SOURCE_CREDITS[s] for s in used if s in SOURCE_CREDITS],

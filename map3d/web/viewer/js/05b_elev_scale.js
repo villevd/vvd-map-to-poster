@@ -64,5 +64,5 @@ const elevScale = (() => {
   }
   const cb = $('scaleOn');
   if (cb) cb.onchange = () => { group.visible = cb.checked; };
-  return { update, show(on) { group.visible = on; } };
+  return { update, group, show(on) { group.visible = on; } };
 })();

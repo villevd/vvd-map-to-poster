@@ -6,12 +6,14 @@ const CUT = { on: { value: 0 }, box: { value: new THREE.Vector4(0, 0, 0, 0) } };
 const UG_STATE = { on: false };   // read by the tile manager: edge chunks stay out while the block of earth is shown
 let ugTileReady = null, ugUpdate = null;   // set by 09b_underground.js
 function cutMaterial(mat) {
+  if (mat.userData.cutOn) return mat;   // already patched: a second patch would declare its varying twice
+  mat.userData.cutOn = true;
   const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey;
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
     sh.uniforms.uCutOn = CUT.on; sh.uniforms.uCutBox = CUT.box;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCutW;')
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCutW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvec4 cutP = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\ncutP = instanceMatrix * cutP;\n#endif\nvCutW = (modelMatrix * cutP).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCutW; uniform float uCutOn; uniform vec4 uCutBox;')
       .replace('void main() {', 'void main() {\n  if (uCutOn > 0.5 && vCutW.x > uCutBox.x && vCutW.x < uCutBox.z && vCutW.z > uCutBox.y && vCutW.z < uCutBox.w) discard;');
   };

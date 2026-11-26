@@ -2,7 +2,7 @@
 // Layers, imagery, exaggeration, sun, fog and quality come back as they were left. The theme is not stored here:
 // the GUI chooses it per model.
 const VIEW_KEY = 'map3d-view';
-const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'texag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality', 'cullOn', 'cullMin', 'roadOp', 'ugMode', 'ugPos', 'ugSize', 'ugDepth', 'ugMines', 'ugDrill', 'ugClaims'];
+const VIEW_IDS = ['satOn', 'texOn', 'treeMatch', 'treeRandom', 'followBox', 'fogOn', 'shadowsOn', 'fowOn', 'exag', 'bexag', 'texag', 'az', 'el', 'dd', 'tspeed', 'rotSpeed', 'quality', 'cullOn', 'cullMin', 'roadOp', 'ugMode', 'ugPos', 'ugSize', 'ugDepth', 'ugXray', 'ugWater', 'ugEsker', 'ugMines', 'ugDrill', 'ugClaims'];
 const VIEW_GROUPS = ['building', 'tree', 'roads', 'markings', 'traffic'];
 const groupBox = g => document.querySelector(`input[data-group="${g}"]`) || (PARENT_DOC && PARENT_DOC.querySelector(`input[data-group="${g}"]`));
 let viewRestoring = false;

@@ -33,6 +33,7 @@ if (CFG.traffic && CFG.traffic.edges.length) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.05 });
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x141a22, roughness: 0.15, metalness: 0.3 });
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  [bodyMat, glassMat, wheelMat].forEach(cutMaterial);   // cars must not float over a cut-away piece of the city
   const kinds = MODELS.map((m, t) => {
     const W = L * 0.4 * SPEC[t].w, n = Math.max(1, count[t]);
     const wheelGeo = new THREE.CylinderGeometry(L * m.wheel, L * m.wheel, W * 1.02, 10).rotateX(Math.PI / 2);

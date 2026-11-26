@@ -6,7 +6,8 @@ const dpr = Math.min(window.devicePixelRatio || 1, 2);
 let savedQuality = 'auto';
 try { savedQuality = (JSON.parse(localStorage.getItem('map3d-view') || '{}') || {}).quality || 'auto'; } catch (e) {}
 const weakDevice = savedQuality === 'low' || savedQuality === 'potato' || (navigator.hardwareConcurrency || 8) <= 2;
-const renderer = new THREE.WebGLRenderer({ antialias: !weakDevice, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+// alpha lets the cake PNG keep a transparent background; the live view always paints an opaque scene background, so it looks the same.
+const renderer = new THREE.WebGLRenderer({ antialias: !weakDevice, alpha: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
 renderer.setPixelRatio(dpr);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;

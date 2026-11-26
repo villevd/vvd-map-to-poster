@@ -102,6 +102,7 @@ function requestChunks() {
 }
 
 function adapt(now) {
+  if (cake.busy) { frames = 0; lastFpsT = now; return; }   // the cake picture sets its own size
   frames++;
   if (now - lastFpsT < 1000) return;
   fps = frames * 1000 / (now - lastFpsT); frames = 0; lastFpsT = now;

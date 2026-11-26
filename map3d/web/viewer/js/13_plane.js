@@ -48,6 +48,7 @@ function initPlane(ap) {
   stripGeo.setAttribute('position', new THREE.BufferAttribute(strip, 3));
   stripGeo.setIndex(sidx);
   const runwayMesh = new THREE.Mesh(stripGeo, new THREE.MeshLambertMaterial({ color: 0x3b3f44, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
+  cutMaterial(runwayMesh.material);   // the runway is cut away with the ground it lies on
   runwayMesh.receiveShadow = true;
   planeRoot.add(runwayMesh); runwayMeshes.push(runwayMesh);
 

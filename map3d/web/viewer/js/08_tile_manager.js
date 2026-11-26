@@ -29,11 +29,17 @@ function updateTiles() {
   const far = +dd.value * T;
   const cuts = PERF.cuts;      // dynamic culling: distances beyond which each kind of object is hidden (Infinity = off)
   const wantShadow = shadowsOn.checked && quality.value !== 'low' && !PERF.potato && PERF.shadowRes > 0;
+  // The tile nearest the camera is never hidden by distance culling: if every tile were culled while the model is still
+  // loading, nothing would be requested or shown, and the opening screen would wait forever.
+  let nearest = null, nearestD = Infinity;
+  for (const t of tileList) { const d = cam.distanceTo(t.center); if (d < nearestD) { nearestD = d; nearest = t; } }
+  const cutTile = window.__ready ? cuts.tile : Infinity;   // no tile culling before the model first appears
   for (const t of tileList) {
     const d = cam.distanceTo(t.center);
     if (controls.target.distanceTo(t.center) < 1.2 * T) t.explored = true;
+    const keep = t === nearest;
     // Hidden tiles (past the draw distance, or unexplored under the fog of war) cost nothing: they are not even loaded
-    const hidden = (fogOn.checked && d > far * 1.15) || (fowOn.checked && !t.explored) || d > cuts.tile || (UG_STATE.on && t.extra);
+    const hidden = (fogOn.checked && d > far * 1.15 && !keep) || (fowOn.checked && !t.explored) || (d > cutTile && !keep) || (UG_STATE.on && t.extra);
     const wantLod = lodFor(d);
     if (!hidden) {
       want(t, maxLod, 0);

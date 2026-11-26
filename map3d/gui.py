@@ -324,6 +324,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(403, "Forbidden host")
         url = urlparse(self.path)
         q = parse_qs(url.query)
+        if url.path in ("/favicon.ico", "/favicon.svg"):
+            # Browsers request /favicon.ico by themselves; the page links the SVG icon too.
+            return self._send(200, FAVICON_SVG.read_bytes(), "image/svg+xml", {"Cache-Control": "max-age=86400"})
         if url.path == "/":
             page = INDEX_HTML
             if os.environ.get(HOT_RELOAD_ENV):
@@ -560,6 +563,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 WEB_DIR = Path(__file__).with_name("web") / "gui"
+FAVICON_SVG = WEB_DIR / "favicon.svg"
 
 
 def _assemble_index() -> str:

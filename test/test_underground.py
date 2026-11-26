@@ -83,6 +83,15 @@ class Normalisers(unittest.TestCase):
         self.assertNotIn("Holder", json.dumps(claims))
         self.assertEqual(claims[0]["ring"][0], claims[0]["ring"][-1])
 
+    def test_esker_lines_are_clipped_to_the_model_and_keep_only_what_is_data(self):
+        raw = {"esker": [{"geometry": {"type": "MultiLineString",
+                                       "coordinates": [[[-77.80, 48.10], [-77.78, 48.10], [-77.50, 48.10]]]},
+                          "properties": {"ESK_NO_SEQ": 7, "ESK_FORME_FLUVI_EN": "Esker (direction known)"}}]}
+        out = ug.eskers_from_sigeom(raw, FRAME)
+        self.assertEqual(len(out), 1)
+        self.assertTrue(all(abs(x) <= FRAME.half + 1 and abs(y) <= FRAME.half + 1 for x, y in out[0]["line"]))
+        self.assertEqual(set(out[0]), {"id", "kind", "line", "source"})       # no invented width or depth
+
     def test_nearby_duplicates_from_other_sources_are_merged(self):
         a = {"name": "Mine A", "x": 0.0, "y": 0.0}
         b = {"name": "Mine A (USGS)", "x": 40.0, "y": 30.0}

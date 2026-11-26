@@ -9,10 +9,12 @@ function ugInit() {
   const BIG = 1e9;
   const ui = {
     box: $('ugBox'), on: $('ugOn'), mode: $('ugMode'), pos: $('ugPos'), size: $('ugSize'), depth: $('ugDepth'),
-    mines: $('ugMines'), drill: $('ugDrill'), claims: $('ugClaims'), fit: $('ugFit'), dig: $('ugDig'), flip: $('ugFlip'),
+    xray: $('ugXray'), water: $('ugWater'), esker: $('ugEsker'), mines: $('ugMines'), drill: $('ugDrill'), claims: $('ugClaims'), fit: $('ugFit'), dig: $('ugDig'), flip: $('ugFlip'),
     legend: $('ugLegend'), posRow: $('ugPosRow'), sizeRow: $('ugSizeRow'), depthO: $('ugDepthO'), posO: $('ugPosO'), sizeO: $('ugSizeO'),
     digRow: $('ugDigRow'),
   };
+  const missing = Object.entries(ui).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) { console.warn('Underground view disabled: panel elements missing:', missing.join(', ')); return; }
   ui.box.hidden = false;
   const grp = new THREE.Group(); grp.visible = false; grp.name = 'underground'; root.add(grp);
   const tip = document.createElement('div'); tip.id = 'ugTip'; tip.hidden = true; document.body.appendChild(tip);
@@ -82,15 +84,18 @@ function ugInit() {
     soil: pixTex((x, y) => y < 1 ? jit([88, 160, 52], 0.35) : y < 2 ? jit(mix3([88, 160, 52], [110, 76, 44], rnd() < 0.5 ? 0.3 : 0.8), 0.3)
       : jit(rnd() < 0.08 ? [70, 48, 28] : [112, 78, 46], 0.28)),
     over: pixTex(() => jit(rnd() < 0.14 ? [118, 120, 116] : rnd() < 0.3 ? [150, 126, 92] : [140, 112, 78], 0.3)),
-    rock: pixTex(() => {
-      const base = mix3([120, 120, 126], hex3(bedrockLayer.color), 0.28);
-      return jit(rnd() < 0.07 ? [70, 70, 76] : rnd() < 0.05 ? [158, 158, 164] : base, 0.26);
+    rock: pixTex((x, y) => {
+      const base = mix3([150, 148, 152], hex3(bedrockLayer.color), 0.1);   // stone, only hinting at the mapped unit's colour
+      const band = 1 + 0.07 * Math.sin(y * 0.55) + 0.05 * Math.sin(y * 1.7 + 2);   // faint horizontal bedding
+      return jit(rnd() < 0.06 ? [86, 86, 94] : rnd() < 0.04 ? [160, 160, 166] : base.map(v => v * band), 0.18);
     }),
     floor: pixTex(() => jit(rnd() < 0.3 ? [58, 58, 64] : [22, 22, 26], 0.4)),
+    gravel: pixTex(() => jit(rnd() < 0.18 ? [128, 128, 128] : rnd() < 0.25 ? [226, 208, 150] : [196, 174, 118], 0.28), 32),
   };
   const wallMat = (map, vc = true) => new THREE.MeshLambertMaterial({ map, vertexColors: vc });
   const MAT = { soil: wallMat(TEX.soil, false), over: wallMat(TEX.over, false), rock: wallMat(TEX.rock),
-    floor: new THREE.MeshLambertMaterial({ map: TEX.floor, side: THREE.DoubleSide }) };
+    floor: new THREE.MeshLambertMaterial({ map: TEX.floor, side: THREE.DoubleSide }),
+    water: new THREE.MeshBasicMaterial({ color: 0x35a8ff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }) };
 
   // ---- the cut region
   const mode = () => ui.mode.value;
@@ -132,7 +137,7 @@ function ugInit() {
         const yt = p.y + lift - top(), yb = bot ? p.y + lift - bot() : floorY;
         pos.push(p.x, yt, p.z, p.x, yb, p.z);
         uv.push(u / cell, (p.y + lift - yt) / cell, u / cell, (p.y + lift - yb) / cell);
-        const shade = key === 'rock' ? (a => [1 - 0.6 * a, 1 - 0.6 * a, 1 - 0.55 * a]) : (() => [1, 1, 1]);
+        const shade = key === 'rock' ? (a => [1 - 0.45 * a, 1 - 0.45 * a, 1 - 0.4 * a]) : (() => [1, 1, 1]);
         const span = Math.max(1, p.y - floorY);
         col.push(...shade(Math.max(0, (p.y - yt) / span)), ...shade(Math.max(0, (p.y - yb) / span)));
         nrm.push(n[0], 0, n[1], n[0], 0, n[1]);
@@ -146,6 +151,20 @@ function ugInit() {
       g.setIndex(idx);
       const m = new THREE.Mesh(g, MAT[key]);
       m.userData.ugWall = true; parent.add(m);
+    }
+    if (ui.water.checked && UGD.water_table) {   // the estimated water table: a subdued copy of the ground, a few metres down
+      const k = Math.max(3, Math.round(pts.length * 0.12));
+      const wt = dispDepth(UGD.water_table.depth_m), th = Math.max(dSoil() * 0.45, 0.004 * fy());
+      const pos = [], idx = [];
+      pts.forEach((p, i) => {
+        let a = 0, c = 0;
+        for (let j = Math.max(0, i - k); j <= Math.min(pts.length - 1, i + k); j++) { a += pts[j].y; c++; }
+        const y = Math.min(a / c, p.y) + lift - wt;
+        pos.push(p.x + n[0] * 0.4, y + th / 2, p.z + n[1] * 0.4, p.x + n[0] * 0.4, y - th / 2, p.z + n[1] * 0.4);
+        if (i) { const q = (i - 1) * 2, b = i * 2; idx.push(...(flip ? [q, b + 1, q + 1, q, b, b + 1] : [q, q + 1, b + 1, q, b + 1, b])); }
+      });
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+      const m = new THREE.Mesh(g, MAT.water); m.userData.ugWall = true; m.renderOrder = 2; parent.add(m);
     }
   }
   // sample positions along an axis-aligned segment, with extra stops where the cut starts and ends
@@ -206,6 +225,14 @@ function ugInit() {
     const gr = g.createLinearGradient(0, 0, 0, 64); gr.addColorStop(0, '#fff'); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, 2, 64);
     return new THREE.CanvasTexture(c); })();
 
+  function addGhost(parent, mesh, kind, color) {   // the same shape again, drawn faintly only where the earth hides it (X-ray)
+    const mat = new THREE.MeshBasicMaterial({ color: color || mesh.material.color, transparent: true, opacity: 0.3, depthWrite: false,
+      depthFunc: THREE.GreaterDepth, side: THREE.DoubleSide });
+    cutMaterial(mat);
+    const g = new THREE.Mesh(mesh.geometry, mat); g.position.copy(mesh.position); g.renderOrder = 4;
+    g.userData.ghost = true; if (kind) g.userData.kind = kind;
+    parent.add(g); return g;
+  }
   function buildFeatures(floorY, fallback) {
     const f = new THREE.Group(), pick = { mines: [], drill: [], claims: [] };
     const r = Math.max(H * 0.0035, 3);
@@ -220,7 +247,7 @@ function ugInit() {
       if (!known) bm.alphaMap = gradTex;   // depth not recorded: the shaft fades out instead of ending at a made-up depth
       const len = known ? s.depth_m * EX.t : fy() * 0.3;
       const down = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.5, r * 0.5, len, 10, 1, true), bm);
-      down.position.y = -len / 2; g.add(down);
+      down.position.y = -len / 2; g.add(down); addGhost(g, down);
       const up = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.2, r * 0.5, r * 14, 8, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.35 * dim, depthWrite: false, blending: THREE.AdditiveBlending }));
       up.position.y = r * 7; g.add(up);
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(r * 1.6), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: dim }));
@@ -257,7 +284,7 @@ function ugInit() {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
       const m = new THREE.Mesh(g, cutMaterial(new THREE.MeshBasicMaterial({ color: 0x3df2ff, side: THREE.DoubleSide })));
-      m.userData.kind = 'drill'; f.add(m);
+      m.userData.kind = 'drill'; f.add(m); addGhost(f, m, 'drill');
     }
     // claims: a faint curtain from the surface to the floor, and a bright outline on the ground
     const claims = UGD.claims || [];
@@ -278,7 +305,52 @@ function ugInit() {
       cg.add(new THREE.LineSegments(lgeo, cutMaterial(new THREE.LineBasicMaterial({ color: 0xffd45e, transparent: true, opacity: 0.85 }))));
       f.add(cg);
     }
-    S.pick = pick;
+    // eskers: the real centre line on the ground, and a sand-and-gravel ridge under it. Only the line is data: the width
+    // and depth of the ridge are typical values, drawn schematically (the legend says so).
+    const eskers = UGD.eskers || [];
+    if (eskers.length) {
+      const eg = new THREE.Group(); eg.userData.kind = 'esker'; pick.esker = [];
+      const pos = [], uv = [], idx = [], lpos = [], W = 130, W2 = 50, D = 25, step = 25;
+      for (const e of eskers) {
+        const pl = e.line.map(p => new THREE.Vector2(p[0], -p[1])), pts = [];
+        let carry = 0;
+        for (let i = 1; i < pl.length; i++) {
+          const a = pl[i - 1], b = pl[i], len = a.distanceTo(b);
+          for (let d = carry; d < len; d += step) pts.push(a.clone().lerp(b, d / len));
+          carry = ((carry - len) % step + step) % step;
+        }
+        pts.push(pl[pl.length - 1].clone());
+        if (pts.length < 2) continue;
+        const ys = pts.map(p => surface(p.x, p.y, fallback)), base = pos.length / 3;
+        let u = 0;
+        pts.forEach((p, i) => {
+          const q = pts[Math.min(i + 1, pts.length - 1)], r = pts[Math.max(i - 1, 0)];
+          const tx = q.x - r.x, tz = q.y - r.y, tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl;
+          if (i) u += p.distanceTo(pts[i - 1]);
+          const top = ys[i] - 0.3, bot = ys[i] - dispDepth(D);
+          for (const [w, y, v] of [[-W / 2, top, 0], [W / 2, top, 0.25], [W2 / 2, bot, 0.5], [-W2 / 2, bot, 0.75]]) { pos.push(p.x + nx * w, y, p.y + nz * w); uv.push(u / 40, v); }
+          if (i) for (let k = 0; k < 4; k++) { const k2 = (k + 1) % 4, a = base + (i - 1) * 4 + k, b = base + (i - 1) * 4 + k2, c = base + i * 4 + k, d = base + i * 4 + k2; idx.push(a, c, b, b, c, d); }
+          lpos.push(p.x, ys[i] + 2, p.y);
+          if (i % 3 === 0) pick.esker.push({ x: p.x, y: ys[i], z: p.y, e });
+        });
+      }
+      if (pos.length) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+        const body = new THREE.Mesh(g, cutMaterial(new THREE.MeshLambertMaterial({ map: TEX.gravel, side: THREE.DoubleSide, color: 0xffffff })));
+        eg.add(body); addGhost(eg, body, null, 0xffe27a);
+        // the line on the ground: a bright thread along the esker, with a label
+        const lines = [];
+        for (const e of eskers) { const n = e.line.length; for (let i = 1; i < n; i++) { const a = e.line[i - 1], b = e.line[i]; lines.push(a[0], surface(a[0], -a[1], fallback) + 2, -a[1], b[0], surface(b[0], -b[1], fallback) + 2, -b[1]); } }
+        const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
+        eg.add(new THREE.LineSegments(lg, cutMaterial(new THREE.LineBasicMaterial({ color: 0xffe27a }))));
+        const mid = pick.esker[Math.floor(pick.esker.length / 2)];
+        if (mid) { const sp = textSprite('Esker', '#ffe27a', 1); sp.position.set(mid.x, mid.y + r * 12, mid.z); S.labels.push(sp); eg.add(sp); }
+      }
+      f.add(eg);
+    }
+    S.pick = pick; S.pulse = [];
+    f.traverse(o => { if (o.userData.pulse) S.pulse.push(o); });
     return f;
   }
 
@@ -338,11 +410,11 @@ function ugInit() {
   function schedule(ms = 160) { if (!UG_STATE.on) return; clearTimeout(S.timer); S.timer = setTimeout(rebuild, ms); }
   function applyFeatureVis() {
     if (!S.feat) return;
+    const on = { mines: ui.mines.checked, drill: ui.drill.checked, claims: ui.claims.checked, esker: ui.esker.checked };
     S.feat.traverse(o => {
       const k = o.userData.kind;
-      if (k === 'mines') o.visible = ui.mines.checked;
-      if (k === 'drill') o.visible = ui.drill.checked;
-      if (k === 'claims') o.visible = ui.claims.checked;
+      if (k) o.visible = on[k] && (!o.userData.ghost || ui.xray.checked);
+      else if (o.userData.ghost) o.visible = ui.xray.checked;
     });
     for (const s of S.labels) if (s.userData.own && s.parent === S.feat) s.visible = ui.mines.checked;
   }
@@ -391,12 +463,16 @@ function ugInit() {
     const m = UGD.max_depth_m || 600, v = Math.log(Math.max(50, Math.min(5000, m * 1.08)) / 50) / Math.log(100) * 100;
     ui.depth.value = v; syncUi(); if (UG_STATE.on) schedule(30);
   };
-  for (const el of [ui.mines, ui.drill, ui.claims]) el.onchange = applyFeatureVis;
+  for (const el of [ui.xray, ui.mines, ui.drill, ui.claims, ui.esker]) el.onchange = applyFeatureVis;
+  ui.water.onchange = () => { if (UG_STATE.on) schedule(30); };
   ugTileReady = () => { if (UG_STATE.on) { S.hCache.clear(); frameVis(); schedule(350); } };
 
   // ---- legend
   (function legend() {
     const L = ui.legend, esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const extra = [];
+    if (UGD.water_table) extra.push(`<div class="ugRow"><i style="background:#35a8ff"></i><span><b>Water table</b><small>estimate · ${esc(UGD.water_table.note)}</small></span></div>`);
+    if ((UGD.eskers || []).length) extra.push(`<div class="ugRow"><i style="background:#e2d096"></i><span><b>Esker</b><small>line is mapped (SIGEOM) · ridge width and depth are schematic</small></span></div>`);
     const rows = layerData.map(l => `<div class="ugRow"><i style="background:${esc(l.color)}"></i><span><b>${esc(l.name)}</b><small>${l.provenance === 'data' ? 'mapped' : 'typical'}${l.note ? ' · ' + esc(l.note) : ''}</small></span></div>`);
     const nS = (UGD.sites || []).length, nD = (UGD.drillholes || []).length, nC = (UGD.claims || []).length;
     const facts = [];
@@ -404,7 +480,7 @@ function ugInit() {
     if (nD) facts.push(`${nD} drill holes${UGD.max_depth_m ? ' (deepest ' + Math.round(UGD.max_depth_m).toLocaleString() + ' m)' : ''}`);
     if (nC) facts.push(`${nC} claims`);
     const col = (UGD.column || []).filter(u => !u.unconsolidated).slice(0, 5).map(u => `${esc(u.name)}${u.lith ? ' — ' + esc(u.lith) : ''}`);
-    L.innerHTML = rows.join('') + (facts.length ? `<p>${facts.join(' · ')}</p>` : '<p>No mines, drill holes or claims on record here.</p>')
+    L.innerHTML = rows.concat(extra).join('') + (facts.length ? `<p>${facts.join(' · ')}</p>` : '<p>No mines, drill holes or claims on record here.</p>')
       + `<p class="ugNote">Depths are real metres below ground (× terrain exaggeration). The first 8 m are drawn thicker so they show. Unknown mine depths fade out instead of being guessed.</p>`
       + (col.length ? `<details><summary>Regional rock column</summary><p>${col.join('<br>')}</p></details>` : '');
   })();
@@ -414,6 +490,7 @@ function ugInit() {
   function screenOf(x, y, z) { v3.set(x, y * root.scale.y, z).project(camera); return v3.z < 1 && v3.z > -1 ? [(v3.x + 1) / 2 * innerWidth, (1 - v3.y) / 2 * innerHeight] : null; }
   function describe(hit) {
     const f = v => v === null || v === undefined || v === '' ? '—' : v;
+    if (hit.e) return `<b>${hit.e.kind}</b><br>Sand and gravel ridge; carries groundwater<br>Line mapped, ridge size schematic<br><small>${hit.e.source}</small>`;
     if (hit.s) { const s = hit.s; return `<b>${s.name}</b><br>${f(s.kind)}${s.status ? ' · ' + s.status : ''}<br>${s.commodity ? s.commodity + '<br>' : ''}Depth: ${s.depth_m ? Math.round(s.depth_m) + ' m' : 'not recorded'}${s.year ? '<br>Found ' + s.year : ''}<br><small>${s.source}</small>`; }
     if (hit.h) { const h = hit.h; return `<b>Drill hole ${h.id}</b><br>${Math.round(h.length_m)} m long · plunge ${Math.round(h.plunge)}° · azimuth ${Math.round(h.azimuth)}°${h.year ? '<br>Drilled ' + h.year : ''}<br><small>${h.source}</small>`; }
     const c = hit.c; return `<b>${c.kind} ${c.id}</b><br>${c.status}<br>${c.area_ha ? Math.round(c.area_ha) + ' ha · ' : ''}expires ${f(c.expires)}<br><small>${c.source}</small>`;
@@ -427,6 +504,7 @@ function ugInit() {
     let best = null, bd = 16;
     if (ui.mines.checked) for (const m of S.pick.mines) { const s = screenOf(m.x, m.y, m.z); if (s) { const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY); if (d < bd) { bd = d; best = m; } } }
     if (!best && ui.drill.checked) { bd = 9; for (const m of S.pick.drill) { const s = screenOf(m.x, m.y, m.z), t = screenOf(m.end.x, m.end.y, m.end.z); for (const q of [s, t]) if (q) { const d = Math.hypot(q[0] - e.clientX, q[1] - e.clientY); if (d < bd) { bd = d; best = m; } } } }
+    if (!best && ui.esker.checked && S.pick.esker) { bd = 10; for (const m of S.pick.esker) { const s = screenOf(m.x, m.y, m.z); if (s) { const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY); if (d < bd) { bd = d; best = m; } } } }
     if (!best && ui.claims.checked) {
       const p = terrainPointAt(e.clientX, e.clientY);
       if (p) for (const c of S.pick.claims) if (pointIn(c.ring, p.x, p.z)) { best = c; break; }
@@ -440,14 +518,16 @@ function ugInit() {
   ugUpdate = now => {
     if (!UG_STATE.on) return;
     hover();
-    const k = 0.0042, pulse = 1 + 0.18 * Math.sin(now / 280);
+    const k = 0.0026, pulse = 1 + 0.18 * Math.sin(now / 280);
     for (const sp of S.labels) {
       const d = camera.position.distanceTo(sp.getWorldPosition(v3));
-      const h = d * k * sp.userData.size; sp.scale.set(h * sp.userData.aspect, h, 1);
+      const h = Math.min(d, H * 3) * k * sp.userData.size; sp.scale.set(h * sp.userData.aspect, h, 1);
     }
-    if (S.feat) S.feat.traverse(o => { if (o.userData.pulse) o.scale.setScalar(pulse); });
+    if (S.pulse) for (const o of S.pulse) o.scale.setScalar(pulse);   // a cached list: no tree walk per frame
   };
   ui.mode.value = 'block'; syncUi();
   if (UGD && new URLSearchParams(location.search).has('underground')) { ui.on.checked = true; enter(); }
 }
-if (UGD) ugInit();
+if (UGD) {   // this view is optional: whatever goes wrong in it must never stop the rest of the viewer
+  try { ugInit(); } catch (e) { console.warn('Underground view disabled:', e); ugUpdate = null; ugTileReady = null; UG_STATE.on = false; const b = $('ugBox'); if (b) b.hidden = true; }
+}

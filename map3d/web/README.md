@@ -17,3 +17,8 @@ Rules that keep parts independent:
 - Shared state (`theme`, `root`, `REAL`, `CFG`) is defined in the earliest parts; do not reassign it elsewhere.
 - After any change, run `python -m pytest test`, and `node --check` on the module script if you
   want a syntax check without a browser.
+
+## Underground cutaway
+`04b_cut.js` holds the shared cut region and `cutMaterial()` (any material that should vanish inside the cut calls it);
+`09b_underground.js` builds the block of earth (strata walls, slice or pit, mines, drill holes, claims, esker, water table) from
+`CFG.underground`, which `map3d/underground.py` fetches. Everything it draws lives under `root`.
