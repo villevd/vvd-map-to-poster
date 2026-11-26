@@ -395,6 +395,19 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[1] == "blob":
                 data = bakedmap.read_blob(f, unquote(parts[2]))
                 return self._error(404, "No such tile") if data is None else self._send(200, data, "application/octet-stream", {"Cache-Control": "no-store"})
+            if len(parts) == 5 and parts[1] == "sat":      # one picture tile: stored in the map, else this computer's cache
+                key = "/".join(unquote(p) for p in parts[2:5])
+                data = bakedmap.read_sat(f, key)
+                if data is None:
+                    from . import satellite
+                    try:
+                        z, x, y = (int(v) for v in parts[2:5])
+                    except ValueError:
+                        return self._error(400, "Bad picture tile")
+                    data = satellite.fetch_tile(z, x, y)
+                if data is None:
+                    return self._error(404, "No such picture tile")
+                return self._send(200, data, "image/jpeg", {"Cache-Control": "max-age=86400"})
             if len(parts) == 3 and parts[1] == "asset":
                 found = bakedmap.read_asset(f, unquote(parts[2]))
                 if found is None:

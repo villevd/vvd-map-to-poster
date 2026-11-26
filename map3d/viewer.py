@@ -29,6 +29,7 @@ from urllib.parse import quote
 import numpy as np
 
 from . import bakedmap
+from . import satellite as satellite_mod
 from .mesh import Scene
 from .style import role_colors
 
@@ -242,17 +243,21 @@ def export_html(scene: Scene, theme: dict, path: str | Path, title: str = "", su
 
 def export_db(scene: Scene, theme: dict, path: str | Path, title: str = "", subtitle: str = "",
               azimuth: float = 225.0, elevation: float = 45.0, credits: str = "",
-              themes: dict | None = None, theme_id: str = "", assets: dict | None = None) -> Path:
-    """Baked map (.db): settings, compressed mesh tiles and the exports (``assets``: extension -> file) in one file."""
+              themes: dict | None = None, theme_id: str = "", assets: dict | None = None,
+              satellite: bool = True) -> Path:
+    """Baked map (.db): settings, compressed mesh tiles, the exports (``assets``: extension -> file) and the satellite
+    picture the ground uses (``satellite``: stored from this computer's picture cache, downloaded when missing)."""
     cfg, blobs = _build(scene, theme, title, subtitle, azimuth, elevation, credits, themes, theme_id)
     compressed = {bid: zlib.compress(b, 6) for bid, b in blobs.items()}
-    return bakedmap.write(path, cfg, compressed, assets)
+    sat = satellite_mod.prefetch(cfg) if satellite else None
+    return bakedmap.write(path, cfg, compressed, assets, sat=sat)
 
 
 def db_page(path: str | Path, name: str) -> str:
     """The built-in viewer for a baked map, served by the GUI: the mesh tiles are fetched from the map's own URL."""
     cfg = bakedmap.read_cfg(path)
     cfg["blobBase"] = f"/maps/{quote(name, safe='')}/blob/"
+    cfg["satBase"] = f"/maps/{quote(name, safe='')}/sat/"   # picture tiles: stored in the map, else from the computer's cache
     _attach_underground(cfg)
     return render_page(_cfg_json(cfg), "", cfg.get("title", ""), cfg["bg"], cfg.get("text", "#ffffff"))
 

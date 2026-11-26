@@ -83,6 +83,9 @@ renderer.setAnimationLoop(now => {
   } else if (!trafficShown) trafficAcc = 0;
   if (planeUpdate) planeUpdate(dtReal);
   keyMove(dt);
+  // Left-drag pan moves the view by a share of its distance, so zoomed right in one drag covers only metres and the
+  // city cannot be crossed. Pan faster as the camera gets closer: 1x at the start distance, up to 6x when very close.
+  controls.panSpeed = THREE.MathUtils.clamp(Math.sqrt(startDist / Math.max(1e-6, camera.position.distanceTo(controls.target))), 1, 6);
   controls.update();
   if (skyDir) camera.lookAt(camera.position.x + skyDir.x, camera.position.y + skyDir.y, camera.position.z + skyDir.z);
   fitClip();

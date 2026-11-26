@@ -6,6 +6,7 @@ A baked map holds everything the built-in viewer needs, so the GUI opens it dire
 * ``meta``   the viewer settings as JSON (title, themes, facts, camera, chunk spec, ...)
 * ``blobs``  the compressed mesh tiles, one row per tile and detail level
 * ``assets`` the exports saved next to the model (poster PNG, GLB, STL), by extension
+* ``sat``    the satellite picture tiles the ground uses, by "z/x/y" (JPEG, as the source sends them)
 
 The standalone ``.html`` export is another way to show the same data (see ``viewer.export_html``), and
 ``convert_html`` turns an existing one into a baked map.
@@ -29,6 +30,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS blobs (id TEXT PRIMARY KEY, data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS assets (ext TEXT PRIMARY KEY, name TEXT NOT NULL, data BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS sat (key TEXT PRIMARY KEY, data BLOB NOT NULL);
 """
 
 
@@ -36,8 +38,10 @@ def _connect_ro(path: str | Path) -> sqlite3.Connection:
     return sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
 
 
-def write(path: str | Path, cfg: dict, blobs: dict[str, bytes], assets: dict[str, str | Path] | None = None) -> Path:
-    """Write a baked map. ``blobs`` maps id -> zlib-compressed bytes; ``assets`` maps extension -> file to store."""
+def write(path: str | Path, cfg: dict, blobs: dict[str, bytes], assets: dict[str, str | Path] | None = None,
+          sat: dict[str, bytes] | None = None) -> Path:
+    """Write a baked map. ``blobs`` maps id -> zlib-compressed bytes; ``assets`` maps extension -> file to store;
+    ``sat`` maps "z/x/y" -> picture tile bytes."""
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     if tmp.exists():
@@ -52,6 +56,7 @@ def write(path: str | Path, cfg: dict, blobs: dict[str, bytes], assets: dict[str
             if ext not in ASSET_MIME or not src.is_file():
                 continue
             con.execute("INSERT INTO assets VALUES (?, ?, ?)", (ext, src.name, sqlite3.Binary(src.read_bytes())))
+        con.executemany("INSERT INTO sat VALUES (?, ?)", ((k, sqlite3.Binary(v)) for k, v in (sat or {}).items()))
         con.commit()
     os.replace(tmp, path)
     return path
@@ -68,6 +73,16 @@ def read_cfg(path: str | Path) -> dict:
 def read_blob(path: str | Path, blob_id: str) -> bytes | None:
     with closing(_connect_ro(path)) as con:
         row = con.execute("SELECT data FROM blobs WHERE id = ?", (blob_id,)).fetchone()
+    return bytes(row[0]) if row else None
+
+
+def read_sat(path: str | Path, key: str) -> bytes | None:
+    """One stored picture tile ("z/x/y"), or None. A map baked before picture tiles were stored has none."""
+    try:
+        with closing(_connect_ro(path)) as con:
+            row = con.execute("SELECT data FROM sat WHERE key = ?", (key,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
     return bytes(row[0]) if row else None
 
 

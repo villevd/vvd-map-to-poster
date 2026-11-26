@@ -82,6 +82,14 @@ function satBitmap(z, x, y) {
   // Close-up pictures need many more picture tiles than the base ones, so the cache is larger
   if (satBitmaps.size > 400) satBitmaps.delete(satBitmaps.keys().next().value);
   satBitmaps.set(k, withTileSlot(async () => {
+    // A baked map serves its picture itself: the tile is in the map, or the GUI fetches it once and keeps it on this computer
+    if (CFG.satBase) {
+      const r = await fetch(`${CFG.satBase}${z}/${x}/${y}`);
+      if (!r.ok) return null;
+      const blob = await r.blob();
+      if (blob.size < 32) return null;
+      return await createImageBitmap(blob);
+    }
     // Stored picture tiles come from IndexedDB; only missing ones go to the network, and then they are stored
     const saved = await idbGet('tiles', k);
     if (saved && saved.blob) { try { return await createImageBitmap(saved.blob); } catch (e) { /* unreadable: fetch again */ } }

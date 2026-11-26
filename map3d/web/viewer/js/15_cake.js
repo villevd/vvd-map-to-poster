@@ -436,7 +436,7 @@ async function renderCakePng(round) {
     Object.assign(colourOv, sv.ov);
     applyThemeTo(root); setThemeColors(); syncPickers();
     scene.background = sv.bg; renderer.setClearColor(sv.clear, sv.clearA);
-    runwayMeshes.forEach(m => { m.visible = true; });
+    runwayMeshes.forEach(m => { m.visible = !!m.userData.landed; });   // only runways that have been landed on
     elevScale.show(sv.scaleShown === null ? !$('scaleOn') || $('scaleOn').checked : sv.scaleShown);
     $('exag').value = sv.exag; applyExaggeration();
     quality.value = sv.quality; quality.onchange();

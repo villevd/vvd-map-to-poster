@@ -50,6 +50,8 @@ function initPlane(ap) {
   const runwayMesh = new THREE.Mesh(stripGeo, new THREE.MeshLambertMaterial({ color: 0x3b3f44, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, side: THREE.DoubleSide }));
   cutMaterial(runwayMesh.material);   // the runway is cut away with the ground it lies on
   runwayMesh.receiveShadow = true;
+  runwayMesh.visible = false;   // shown only once a landing starts (see landBtn.onclick)
+  runwayMesh.userData.landed = false;
   planeRoot.add(runwayMesh); runwayMeshes.push(runwayMesh);
 
   // the plane: nose +X, up +Y, left wing -Z (the same axes as the aircraft library)
@@ -128,6 +130,7 @@ function initPlane(ap) {
   landBtn.onclick = () => {
     st.s = 0; st.active = true; st.done = false; st.locked = false; st.follow = followBox.checked;
     planeGroup.visible = true; landBtn.textContent = 'Landing…';
+    runwayMesh.userData.landed = true; runwayMesh.visible = true;   // the fake runway appears with the landing
     lastP.copy(planeGroup.getWorldPosition(new THREE.Vector3()));
   };
   followBox.onchange = () => { st.follow = followBox.checked; st.locked = false; };

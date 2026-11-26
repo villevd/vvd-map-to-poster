@@ -250,12 +250,14 @@ function ugInit() {
 
   // ---- sprites for labels and the depth ruler
   function textSprite(text, color = '#ffffff', size = 1) {
-    const c = document.createElement('canvas'), g = c.getContext('2d'), fs = 44;
+    const c = document.createElement('canvas'), g = c.getContext('2d'), fs = 64, pad = 18;
     g.font = `600 ${fs}px system-ui, sans-serif`;
-    const w = Math.ceil(g.measureText(text).width) + 24; c.width = w; c.height = fs + 20;
+    const w = Math.ceil(g.measureText(text).width) + 2 * pad; c.width = w; c.height = fs + 28;
     g.font = `600 ${fs}px system-ui, sans-serif`; g.textBaseline = 'middle';
-    g.fillStyle = 'rgba(8,8,12,0.62)'; g.beginPath(); g.roundRect(0, 0, c.width, c.height, 14); g.fill();
-    g.fillStyle = color; g.fillText(text, 12, c.height / 2 + 2);
+    g.fillStyle = 'rgba(8,8,12,0.82)'; g.beginPath(); g.roundRect(0, 0, c.width, c.height, 18); g.fill();
+    // dark outline under the text: light commodity colours (gold, silver, lithium) stay readable on any background
+    g.lineJoin = 'round'; g.lineWidth = 8; g.strokeStyle = 'rgba(0,0,0,0.9)'; g.strokeText(text, pad, c.height / 2 + 2);
+    g.fillStyle = color; g.fillText(text, pad, c.height / 2 + 2);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
     sp.renderOrder = 20; sp.userData.aspect = c.width / c.height; sp.userData.size = size; sp.userData.own = true;
@@ -446,7 +448,14 @@ function ugInit() {
     ticks.forEach(d => { const y = rg - dispDepth(d); tp.push(rx - H * 0.012, y, rz, rx + H * 0.012, y, rz); });
     lg.setAttribute('position', new THREE.Float32BufferAttribute(tp, 3));
     grp.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 })));
-    ticks.forEach(d => { const sp = textSprite(d === 0 ? 'ground' : d + ' m', '#ffffff', 0.7); sp.position.set(rx - H * 0.05, rg - dispDepth(d), rz); S.labels.push(sp); grp.add(sp); });
+    // each tick label may only be as tall as the gap to its neighbours on the ruler, so close ticks never pile up
+    const tickY = ticks.map(d => rg - dispDepth(d));
+    ticks.forEach((d, i) => {
+      const sp = textSprite(d === 0 ? 'ground' : d + ' m', '#ffffff', 0.9);
+      const gaps = [i > 0 ? tickY[i - 1] - tickY[i] : Infinity, i < ticks.length - 1 ? tickY[i] - tickY[i + 1] : Infinity];
+      sp.userData.cap = Math.min(...gaps) * 0.85;   // world height limit for this label
+      sp.position.set(rx - H * 0.05, tickY[i], rz); S.labels.push(sp); grp.add(sp);
+    });
     S.feat = buildFeatures(floorY, fallback);
     applyFeatureVis(); grp.add(S.feat);
     applyCut();
@@ -575,10 +584,12 @@ function ugInit() {
   ugUpdate = now => {
     if (!UG_STATE.on) return;
     hover();
-    const k = 0.0026, pulse = 1 + 0.18 * Math.sin(now / 280);
+    const k = 0.0036, pulse = 1 + 0.18 * Math.sin(now / 280);   // label size on screen: bigger than before, still steady
     for (const sp of S.labels) {
       const d = camera.position.distanceTo(sp.getWorldPosition(v3));
-      const h = Math.min(d, H * 3) * k * sp.userData.size; sp.scale.set(h * sp.userData.aspect, h, 1);
+      let h = Math.min(d, H * 3) * k * sp.userData.size;
+      if (sp.userData.cap !== undefined) h = Math.min(h, sp.userData.cap);   // shrink to fit between neighbouring ticks
+      sp.scale.set(h * sp.userData.aspect, h, 1);
     }
     if (S.pulse) for (const o of S.pulse) o.scale.setScalar(pulse);   // a cached list: no tree walk per frame
   };
