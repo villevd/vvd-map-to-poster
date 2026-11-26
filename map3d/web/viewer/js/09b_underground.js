@@ -18,6 +18,7 @@ function ugInit() {
   ui.box.hidden = false;
   const grp = new THREE.Group(); grp.visible = false; grp.name = 'underground'; root.add(grp);
   const tip = document.createElement('div'); tip.id = 'ugTip'; tip.hidden = true; document.body.appendChild(tip);
+  const topLeg = document.createElement('div'); topLeg.id = 'ugTopLegend'; topLeg.hidden = true; document.body.appendChild(topLeg);
   const S = { pit: { x: 0, z: 0 }, flip: false, hCache: new Map(), list: null, timer: 0, saved: null, feat: null, labels: [] };
 
   // ---- depth scale: real metres below the ground -> local y units
@@ -303,7 +304,8 @@ function ugInit() {
       [down.material, up.material].forEach(cutMaterial); cutMaterial(gem.material);
       g.userData.site = s; mineG.add(g);
       if (i < 24) {
-        const sp = textSprite(s.name + (known ? ` · ${Math.round(s.depth_m)} m` : ''), '#' + col.getHexString(), 1);
+        // size 2.5: at size 1 the names were about 6 px tall on a 1000 px screen (unreadable); size 5 made them huge
+        const sp = textSprite(s.name + (known ? ` · ${Math.round(s.depth_m)} m` : ''), '#' + col.getHexString(), 2.5);
         sp.position.set(x, y + r * 21, z); S.labels.push(sp); f.add(sp);
       }
       pick.mines.push({ x, y: y + r * 15, z, s });
@@ -488,14 +490,14 @@ function ugInit() {
     UG_STATE.on = true;
     S.saved = { polar: controls.maxPolarAngle, min: controls.minDistance };
     controls.maxPolarAngle = Math.PI - 0.04;
-    grp.visible = true; frameVis(); syncUi();
+    grp.visible = true; topLeg.hidden = false; frameVis(); syncUi();
     if (mode() === 'pit' && !S.pit.set) { S.pit.x = controls.target.x; S.pit.z = controls.target.z; S.pit.set = true; }
     applyCut(); rebuild();
   }
   function leave() {
     UG_STATE.on = false; clearTimeout(S.timer);
     if (S.saved) { controls.maxPolarAngle = S.saved.polar; controls.update(); }
-    grp.visible = false; CUT.on.value = 0; frameVis(); tip.hidden = true;
+    grp.visible = false; topLeg.hidden = true; CUT.on.value = 0; frameVis(); tip.hidden = true;
     for (const c of [...grp.children]) { grp.remove(c); dispose(c); }
     S.feat = null; S.pick = null;
   }
@@ -536,6 +538,20 @@ function ugInit() {
     L.innerHTML = rows.concat(extra).join('') + (facts.length ? `<p>${facts.join(' · ')}</p>` : '<p>No mines, drill holes or claims on record here.</p>')
       + `<p class="ugNote">Depths are real metres below ground (× terrain exaggeration). The first 8 m are drawn thicker so they show. Unknown mine depths fade out instead of being guessed.</p>`
       + (col.length ? `<details><summary>Regional rock column</summary><p>${col.join('<br>')}</p></details>` : '');
+
+    // top legend (shown while the underground view is on): the colours in the scene, how many of each, and what they are
+    const nE = (UGD.eskers || []).length;
+    const row = (color, label, what) => `<div class="ugTopRow"><i style="background:${color}"></i><span><b>${label}</b><small>${what}</small></span></div>`;
+    const top = [];
+    if (nS) top.push(row('#ffd23a', `${nS} mines &amp; deposits`, 'Beacons at the surface, coloured by main commodity (gold, copper, zinc…). A solid shaft means the depth is known; a fading one means it is not.'));
+    if (nD) top.push(row('#3df2ff', `${nD} drill holes`, 'Cyan tubes going down from the ground in their real direction and angle' + (UGD.max_depth_m ? `; deepest ${Math.round(UGD.max_depth_m).toLocaleString()} m` : '') + '.'));
+    if (nC) top.push(row('#ffd45e', `${nC} mining claims`, 'Yellow outlines on the ground with posts going down. A claim is an area registered for mineral exploration, not a mine.'));
+    if (nE) top.push(row('#ffe27a', `${nE} eskers`, 'Pale yellow line on the ground with a buried sand-and-gravel ridge under it, left by old rivers under ice. They carry groundwater.'));
+    if (UGD.water_table) top.push(row('#35a8ff', 'Water table', 'Blue sheet: estimated depth where the ground is saturated with water. An estimate, not a measurement.'));
+    top.push(row('#9a7a52', 'Soil &amp; rock', 'Brown: soil and overburden. Grey: bedrock. The top 8 m are drawn thicker than true depth so they show.'));
+    topLeg.innerHTML = `<button type="button" class="ugTopHead" aria-expanded="true">Legend <span aria-hidden="true">▾</span></button><div class="ugTopBody">${top.join('')}</div>`;
+    const head = topLeg.querySelector('.ugTopHead'), body = topLeg.querySelector('.ugTopBody');
+    head.onclick = () => { body.hidden = !body.hidden; head.setAttribute('aria-expanded', String(!body.hidden)); head.querySelector('span').textContent = body.hidden ? '▸' : '▾'; };
   })();
 
   // ---- hover: mines first, then drill collars, then the claim under the cursor
@@ -587,8 +603,10 @@ function ugInit() {
     const k = 0.0036, pulse = 1 + 0.18 * Math.sin(now / 280);   // label size on screen: bigger than before, still steady
     for (const sp of S.labels) {
       const d = camera.position.distanceTo(sp.getWorldPosition(v3));
-      let h = Math.min(d, H * 3) * k * sp.userData.size;
-      if (sp.userData.cap !== undefined) h = Math.min(h, sp.userData.cap);   // shrink to fit between neighbouring ticks
+      // the sprite sits under root, which is stretched vertically by the terrain exaggeration: divide that out so the
+      // label keeps its proportions and its steady on-screen size
+      let h = Math.min(d, H * 3) * k * sp.userData.size / root.scale.y;
+      if (sp.userData.cap !== undefined) h = Math.min(h, sp.userData.cap);   // shrink to fit between neighbouring ticks (local units)
       sp.scale.set(h * sp.userData.aspect, h, 1);
     }
     if (S.pulse) for (const o of S.pulse) o.scale.setScalar(pulse);   // a cached list: no tree walk per frame

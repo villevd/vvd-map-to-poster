@@ -332,6 +332,17 @@ def _status_kind(status: str) -> str:
     return "other"
 
 
+# Mine depths looked up on the web (SIGEOM does not record them). Keyed by the SIGEOM name. Each entry says
+# what the figure is, so a depth is never presented as more certain than its source.
+MINE_DEPTHS_M = {
+    "Lamaque": (1100.0, "shaft depth of the original Lamaque mine, Canadian Mining Journal (undated article)"),
+    "Mine Lamaque": (1100.0, "shaft depth of the original Lamaque mine, Canadian Mining Journal (undated article)"),
+    "Mine Sigma": (1825.0, "original Sigma shaft depth, Canadian Mining Journal (undated article)"),
+    "Mine East Sullivan (Sullico)": (930.0, "vertical depth of the East Sullivan deposit, company release (Sulliden)"),
+    "Mine Stabell - Puits No. 2": (313.0, "No. 2 shaft, 1,026 ft, Northern Miner (undated article)"),
+}
+
+
 def sites_from_sigeom(raw, frame) -> list[dict]:
     out = []
     if not raw:
@@ -341,12 +352,15 @@ def sites_from_sigeom(raw, frame) -> list[dict]:
         if not p:
             continue
         x, y = frame.to_xy(*p)
+        name = props.get("NOM_CORPS_MINR") or "Deposit"
+        depth = MINE_DEPTHS_M.get(name, (None, None))
         out.append({
-            "name": props.get("NOM_CORPS_MINR") or "Deposit",
+            "name": name,
             "kind": "mine" if "mine" in str(props.get("ETAT_CORPS_MINR_EN", "")).lower() else "deposit",
             "status": props.get("ETAT_CORPS_MINR_EN") or "", "state": _status_kind(props.get("ETAT_CORPS_MINR_EN")),
             "commodity": props.get("SUBST_PRINC_EN") or props.get("ELMN_CHIM_PERD_EN") or "",
-            "year": props.get("AN_DECV"), "depth_m": None, "x": round(x, 1), "y": round(y, 1), "source": "sigeom",
+            "year": props.get("AN_DECV"), "depth_m": depth[0], "depth_source": depth[1],
+            "x": round(x, 1), "y": round(y, 1), "source": "sigeom",
         })
     for feat in raw.get("projects", []):
         p, props = _point(feat.get("geometry")), feat.get("properties") or {}
@@ -354,10 +368,12 @@ def sites_from_sigeom(raw, frame) -> list[dict]:
             continue
         x, y = frame.to_xy(*p)
         status = props.get("SIGN_STAT_MINE_PROJE_ANG") or ""
+        name = props.get("NOM_MINE_PROJE") or "Mine"
+        depth = MINE_DEPTHS_M.get(name, (None, None))
         out.append({
-            "name": props.get("NOM_MINE_PROJE") or "Mine", "kind": "mine", "status": status,
+            "name": name, "kind": "mine", "status": status,
             "state": _status_kind(status), "commodity": props.get("SIGN_MINR_ANG") or "",
-            "operator": props.get("NOM_SOCIE") or "", "depth_m": None,
+            "operator": props.get("NOM_SOCIE") or "", "depth_m": depth[0], "depth_source": depth[1],
             "x": round(x, 1), "y": round(y, 1), "source": "sigeom",
         })
     return out
