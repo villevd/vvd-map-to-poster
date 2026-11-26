@@ -91,11 +91,41 @@
   #perfHud .ph-stats div { display: flex; justify-content: space-between; }
   #perfHud .ph-stats span { opacity: .65; }
   #perfHud .ph-stats b { font-variant-numeric: tabular-nums; font-weight: 600; }
-  @media (max-width: 640px) {
-    #ui { width: auto; right: 12px; left: 12px; top: auto; bottom: 12px; padding: 10px 12px; max-height: 45vh; }
-    #ui .sub, #hint, #credits, #activity { display: none; }
-    #perfHud { top: 10px; right: 10px; min-width: 0; padding: 6px 9px; }
-    #perfHud .ph-cull { display: none; }
+  /* Desktop: the tab bar, sheet header and launcher are phone-only (scoped to #ui so the GUI's copy of these rules keeps them) */
+  #ui #uiTabs, #ui #uiClose { display: none; }
+  #uiOpen { display: none; }
+
+  /* Phones: the controls are one bottom sheet with a tab per group, so one screen of options shows at a time.
+     The map keeps the screen until "Controls" is tapped; the sheet closes with its × button. */
+  @media (max-width: 720px) {
+    #ui { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 60vh; padding: 0; display: flex; flex-direction: column;
+      border-radius: 16px 16px 0 0; border-width: 1px 0 0; background: color-mix(in srgb, var(--bg) 96%, transparent);
+      overflow: hidden; transform: translateY(105%); visibility: hidden; transition: transform .25s ease, visibility .25s; z-index: 4; }
+    #ui.open { transform: none; visibility: visible; }
+    #ui .ui-head { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px 0; }
+    #ui .ui-title { flex: 1; min-width: 0; }
+    #ui h1 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #ui .sub { display: none; }
+    #ui #uiClose { display: block; flex: none; width: 36px; height: 36px; padding: 0; font-size: 22px; line-height: 1; }
+    #ui #uiTabs { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--text) 15%, transparent); }
+    #ui #uiTabs button { flex: none; min-height: 36px; padding: 6px 4px; font-size: 13px; border-radius: 999px; }
+    #ui #uiTabs button.on { background: var(--text); color: var(--bg); }
+    #ui #uiTabs button[hidden] { display: none; }
+    #ui .ui-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 14px 22px; overscroll-behavior: contain; }
+    #ui .pane { display: none; }
+    #ui[data-tab=map] [data-pane=map], #ui[data-tab=look] [data-pane=look],
+    #ui[data-tab=weather] [data-pane=weather], #ui[data-tab=under] [data-pane=under] { display: block; }
+    #ui .pane-fold > summary { display: none; }
+    #ui label { min-height: 36px; }
+    #ui input[type=range] { height: 32px; }
+    #ui button { min-height: 40px; }
+    #ui .btns { margin-bottom: 4px; }
+    #uiOpen { display: block; position: fixed; right: 12px; bottom: 34px; z-index: 3; padding: 12px 20px; border-radius: 999px;
+      font: 600 14px system-ui, sans-serif; color: var(--bg); background: var(--text); border: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+    #uiOpen[aria-expanded=true] { display: none; }
+    body.nopanel #uiOpen { display: none; }
+    #hint, #perfHud, #activity { display: none; }
+    #credits { left: 12px; right: 12px; bottom: 6px; max-width: none; text-align: left; font-size: 10px; }
   }
   #colorsBox { margin: 8px 0 2px; font-size: 12px; }
   #colorsBox summary { cursor: pointer; opacity: .85; margin-bottom: 4px; }

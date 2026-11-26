@@ -10,118 +10,141 @@ __VIEWER_CSS__</style>
 <body>
 <div id="findBox" hidden><input id="find" type="search" placeholder="Find a place…  (Enter to go, ↑↓ for other matches, Esc to close)" autocomplete="off"><ul id="findList"></ul></div>
 <div id="loading"><div id="lbox"><div id="ltitle">Opening the 3D model</div><ol id="lsteps"></ol><div id="lnote"></div></div></div>
-<div id="ui">
-  <h1 id="t"></h1>
-  <p class="sub" id="s"></p>
-  <span class="row">Theme</span>
-  <select id="themeSel"></select>
-  <details id="colorsBox"><summary>Colours</summary>
-    <div id="colorPickers"></div>
-    <label><input type="checkbox" id="treeMatch" checked> Trees match ground colour</label>
-    <label><input type="checkbox" id="treeRandom" checked> Random tree shades</label>
-    <div class="btns"><button id="colorReset">Reset colours</button></div>
-  </details>
-  <label><input type="checkbox" data-group="building" checked> Buildings</label>
-  <label><input type="checkbox" data-group="tree" checked> Trees</label>
-  <label><input type="checkbox" data-group="roads" checked> Roads &amp; bridges</label>
-  <label><input type="checkbox" data-group="markings" checked> Road markings</label>
-  <span class="row" id="roadOpRow">Road transparency <output id="roadOpO"></output></span>
-  <input type="range" id="roadOp" min="0" max="1" step="0.05" value="1">
-  <label id="trafficRow"><input type="checkbox" data-group="traffic" checked> Traffic (stops at real lights &amp; signs)</label>
-  <label><input type="checkbox" id="scaleOn" checked> Elevation scales (corners)</label>
-  <label><input type="checkbox" id="satOn"> Satellite ground (map overlay)</label>
-  <label><input type="checkbox" id="texOn"> Real building textures</label>
-  <span class="row" id="trafficSpeedRow">Traffic speed multiplier <output id="tspeedO"></output></span>
-  <input type="range" id="tspeed" min="0" max="4" step="0.25" value="1">
-  <div class="btns"><button id="landBtn">Land a plane</button></div>
-  <label><input type="checkbox" id="followBox" checked> Follow the plane</label>
-  <span class="row">Terrain exaggeration <output id="vExagO"></output></span>
-  <input type="range" id="exag" min="0.2" max="6" step="0.1" value="1">
-  <span class="row">Building height <output id="vBexagO"></output></span>
-  <input type="range" id="bexag" min="0.2" max="6" step="0.1" value="1">
-  <span class="row">Tree height <output id="vTexagO"></output></span>
-  <input type="range" id="texag" min="0.2" max="6" step="0.1" value="1">
-  <span class="row">Sun direction</span>
-  <input type="range" id="az" min="0" max="360" step="1">
-  <span class="row">Sun height</span>
-  <input type="range" id="el" min="8" max="85" step="1">
-  <details id="wxBox" open><summary>Weather</summary>
-    <span class="row">Conditions</span>
-    <select id="wxPreset">
-      <option value="live">Live (real weather)</option>
-      <option value="clear">Clear</option><option value="partly">Partly cloudy</option><option value="overcast">Overcast</option>
-      <option value="fog">Fog</option><option value="lightrain">Light rain</option><option value="heavyrain">Heavy rain</option>
-      <option value="snow">Snow</option><option value="blizzard">Blizzard</option><option value="storm">Thunderstorm</option>
-      <option value="custom" hidden>Custom</option>
-    </select>
-    <div id="wxManual" hidden>
-      <span class="row">Temperature <output id="wxTempO"></output></span>
-      <input type="range" id="wxTemp" min="-30" max="35" step="1" value="15">
-      <span class="row">Cloud cover <output id="wxCloudO"></output></span>
-      <input type="range" id="wxCloud" min="0" max="1" step="0.05" value="0.3">
-      <p class="sub">Sky, cloud and fog follow these in the realistic view.</p>
-    </div>
-    <label><input type="checkbox" id="rainOn"> Rain</label>
-    <input type="range" id="rainAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
-    <label><input type="checkbox" id="snowOn"> Snow</label>
-    <input type="range" id="snowAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
-    <span class="row">Wind <output id="windO"></output></span>
-    <input type="range" id="windAmt" min="0" max="1" step="0.05" value="0.3">
-  </details>
-  <details id="ugBox" hidden open><summary>Underground</summary>
-    <label><input type="checkbox" id="ugOn"> Show what is under the city</label>
-    <span class="row">Cut</span>
-    <select id="ugMode">
-      <option value="block">Whole block (sides only)</option>
-      <option value="sliceX">Slice, north-south plane</option>
-      <option value="sliceZ">Slice, east-west plane</option>
-      <option value="pit">Pit (dig here)</option>
-    </select>
-    <div id="ugPosRow" hidden><span class="row">Slice position <output id="ugPosO"></output></span>
-      <input type="range" id="ugPos" min="-95" max="95" step="1" value="0">
-      <div class="btns"><button id="ugFlip">Flip side</button></div></div>
-    <div id="ugSizeRow" hidden><span class="row">Pit size <output id="ugSizeO"></output></span>
-      <input type="range" id="ugSize" min="4" max="70" step="1" value="20"></div>
-    <div id="ugDigRow" class="btns" hidden><button id="ugDig">Dig at view target</button></div>
-    <span class="row">Depth <output id="ugDepthO"></output></span>
-    <input type="range" id="ugDepth" min="0" max="100" step="1" value="54">
-    <div class="btns"><button id="ugFit">Fit to deepest</button></div>
-    <label><input type="checkbox" id="ugXray" checked> X-ray (show workings through the earth)</label>
-    <label><input type="checkbox" id="ugWater" checked> Water table (estimated)</label>
-    <label><input type="checkbox" id="ugEsker" checked> Esker (sand &amp; gravel aquifer)</label>
-    <label><input type="checkbox" id="ugMines" checked> Mines &amp; deposits</label>
-    <label><input type="checkbox" id="ugDrill" checked> Drill holes</label>
-    <label><input type="checkbox" id="ugClaims" checked> Mining claims</label>
-    <div id="ugLegend"></div>
-  </details>
-  <label><input type="checkbox" id="real"> Realistic view (now)</label>
-  <div id="realBox" hidden>
-    <span class="row">Time of day</span>
-    <input type="range" id="tod" min="0" max="24" step="0.25" value="12">
-    <div class="btns"><button id="nowBtn">Now</button></div>
-    <p class="sub" id="realInfo"></p>
+<div id="ui" data-tab="map">
+  <div class="ui-head">
+    <div class="ui-title"><h1 id="t"></h1><p class="sub" id="s"></p></div>
+    <button type="button" id="uiClose" aria-label="Close the controls">×</button>
   </div>
-  <details id="perf"><summary>Performance</summary>
-    <span class="row">Quality</span>
-    <select id="quality"><option value="auto">Auto (adapts to your GPU)</option><option value="high">High</option><option value="low">Low</option><option value="potato">Potato (max performance)</option></select>
-    <label><input type="checkbox" id="shadowsOn" checked> Real-time shadows</label>
-    <label><input type="checkbox" id="fogOn"> Fog &amp; draw distance</label>
-    <span class="row">View distance <output id="ddO"></output></span>
-    <input type="range" id="dd" min="1.5" max="14" step="0.5">
-    <label id="fowRow"><input type="checkbox" id="fowOn"> Fog of war (reveal by exploring)</label>
-    <div id="stats"></div>
-  </details>
-  <span class="row">Rotation speed</span>
-  <input type="range" id="rotSpeed" min="0.1" max="8" step="0.1" value="0.8">
-  <div class="btns">
-    <button id="rot">Auto-rotate</button><button id="reset">Reset view</button><button id="horizon">Sky view</button><button id="shot">Save PNG</button>
-  </div>
-  <div id="cakeBox">
-  <span class="row">Cake message (arched above it; empty for none)</span>
-  <input type="text" id="cakeText" maxlength="60" value="Bonne fête Sylviane!" placeholder="Text above the cake">
-  <div class="btns"><button id="cakeBtn">Render as cake</button><button id="cakeRoundBtn">Render as round cake</button></div>
+  <!-- Phones show one of these panes at a time (see the phone block in style.css); desktop shows them all, one after the other -->
+  <nav id="uiTabs" aria-label="Controls">
+    <button type="button" data-tab="map" class="on">Map</button>
+    <button type="button" data-tab="look">Look</button>
+    <button type="button" data-tab="weather">Weather</button>
+    <button type="button" data-tab="under" id="uiTabUnder" hidden>Underground</button>
+  </nav>
+  <div class="ui-body">
+    <section class="pane" data-pane="map">
+      <span class="row">Theme</span>
+      <select id="themeSel"></select>
+      <details id="colorsBox"><summary>Colours</summary>
+        <div id="colorPickers"></div>
+        <label><input type="checkbox" id="treeMatch" checked> Trees match ground colour</label>
+        <label><input type="checkbox" id="treeRandom" checked> Random tree shades</label>
+        <div class="btns"><button id="colorReset">Reset colours</button></div>
+      </details>
+      <label><input type="checkbox" data-group="building" checked> Buildings</label>
+      <label><input type="checkbox" data-group="tree" checked> Trees</label>
+      <label><input type="checkbox" data-group="roads" checked> Roads &amp; bridges</label>
+      <label><input type="checkbox" data-group="markings" checked> Road markings</label>
+      <span class="row" id="roadOpRow">Road transparency <output id="roadOpO"></output></span>
+      <input type="range" id="roadOp" min="0" max="1" step="0.05" value="1">
+      <label id="trafficRow"><input type="checkbox" data-group="traffic" checked> Traffic (stops at real lights &amp; signs)</label>
+      <span class="row" id="trafficSpeedRow">Traffic speed multiplier <output id="tspeedO"></output></span>
+      <input type="range" id="tspeed" min="0" max="4" step="0.25" value="1">
+      <label><input type="checkbox" id="scaleOn" checked> Elevation scales (corners)</label>
+      <label><input type="checkbox" id="satOn"> Satellite ground (map overlay)</label>
+      <label><input type="checkbox" id="texOn"> Real building textures</label>
+      <div class="btns"><button id="landBtn">Land a plane</button></div>
+      <label><input type="checkbox" id="followBox" checked> Follow the plane</label>
+    </section>
+
+    <section class="pane" data-pane="look">
+      <span class="row">Terrain exaggeration <output id="vExagO"></output></span>
+      <input type="range" id="exag" min="0.2" max="6" step="0.1" value="1">
+      <span class="row">Building height <output id="vBexagO"></output></span>
+      <input type="range" id="bexag" min="0.2" max="6" step="0.1" value="1">
+      <span class="row">Tree height <output id="vTexagO"></output></span>
+      <input type="range" id="texag" min="0.2" max="6" step="0.1" value="1">
+      <span class="row">Sun direction</span>
+      <input type="range" id="az" min="0" max="360" step="1">
+      <span class="row">Sun height</span>
+      <input type="range" id="el" min="8" max="85" step="1">
+      <label><input type="checkbox" id="real"> Realistic view (now)</label>
+      <div id="realBox" hidden>
+        <span class="row">Time of day</span>
+        <input type="range" id="tod" min="0" max="24" step="0.25" value="12">
+        <div class="btns"><button id="nowBtn">Now</button></div>
+        <p class="sub" id="realInfo"></p>
+      </div>
+      <details id="perf"><summary>Performance</summary>
+        <span class="row">Quality</span>
+        <select id="quality"><option value="auto">Auto (adapts to your GPU)</option><option value="high">High</option><option value="low">Low</option><option value="potato">Potato (max performance)</option></select>
+        <label><input type="checkbox" id="shadowsOn" checked> Real-time shadows</label>
+        <label><input type="checkbox" id="fogOn"> Fog &amp; draw distance</label>
+        <span class="row">View distance <output id="ddO"></output></span>
+        <input type="range" id="dd" min="1.5" max="14" step="0.5">
+        <label id="fowRow"><input type="checkbox" id="fowOn"> Fog of war (reveal by exploring)</label>
+        <div id="stats"></div>
+      </details>
+      <span class="row">Rotation speed</span>
+      <input type="range" id="rotSpeed" min="0.1" max="8" step="0.1" value="0.8">
+      <div class="btns">
+        <button id="rot">Auto-rotate</button><button id="reset">Reset view</button><button id="horizon">Sky view</button><button id="shot">Save PNG</button>
+      </div>
+      <div id="cakeBox">
+      <span class="row">Cake message (arched above it; empty for none)</span>
+      <input type="text" id="cakeText" maxlength="60" value="Bonne fête Sylviane!" placeholder="Text above the cake">
+      <div class="btns"><button id="cakeBtn">Render as cake</button><button id="cakeRoundBtn">Render as round cake</button></div>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="weather">
+      <details id="wxBox" open class="pane-fold"><summary>Weather</summary>
+        <span class="row">Conditions</span>
+        <select id="wxPreset">
+          <option value="live">Live (real weather)</option>
+          <option value="clear">Clear</option><option value="partly">Partly cloudy</option><option value="overcast">Overcast</option>
+          <option value="fog">Fog</option><option value="lightrain">Light rain</option><option value="heavyrain">Heavy rain</option>
+          <option value="snow">Snow</option><option value="blizzard">Blizzard</option><option value="storm">Thunderstorm</option>
+          <option value="custom" hidden>Custom</option>
+        </select>
+        <div id="wxManual" hidden>
+          <span class="row">Temperature <output id="wxTempO"></output></span>
+          <input type="range" id="wxTemp" min="-30" max="35" step="1" value="15">
+          <span class="row">Cloud cover <output id="wxCloudO"></output></span>
+          <input type="range" id="wxCloud" min="0" max="1" step="0.05" value="0.3">
+          <p class="sub">Sky, cloud and fog follow these in the realistic view.</p>
+        </div>
+        <label><input type="checkbox" id="rainOn"> Rain</label>
+        <input type="range" id="rainAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
+        <label><input type="checkbox" id="snowOn"> Snow</label>
+        <input type="range" id="snowAmt" min="0.05" max="1" step="0.05" value="0.6" disabled>
+        <span class="row">Wind <output id="windO"></output></span>
+        <input type="range" id="windAmt" min="0" max="1" step="0.05" value="0.3">
+      </details>
+    </section>
+
+    <section class="pane" data-pane="under">
+      <details id="ugBox" hidden open class="pane-fold"><summary>Underground</summary>
+        <label><input type="checkbox" id="ugOn"> Show what is under the city</label>
+        <span class="row">Cut</span>
+        <select id="ugMode">
+          <option value="block">Whole block (sides only)</option>
+          <option value="sliceX">Slice, north-south plane</option>
+          <option value="sliceZ">Slice, east-west plane</option>
+          <option value="pit">Pit (dig here)</option>
+        </select>
+        <div id="ugPosRow" hidden><span class="row">Slice position <output id="ugPosO"></output></span>
+          <input type="range" id="ugPos" min="-95" max="95" step="1" value="0">
+          <div class="btns"><button id="ugFlip">Flip side</button></div></div>
+        <div id="ugSizeRow" hidden><span class="row">Pit size <output id="ugSizeO"></output></span>
+          <input type="range" id="ugSize" min="4" max="70" step="1" value="20"></div>
+        <div id="ugDigRow" class="btns" hidden><button id="ugDig">Dig at view target</button></div>
+        <span class="row">Depth <output id="ugDepthO"></output></span>
+        <input type="range" id="ugDepth" min="0" max="100" step="1" value="54">
+        <div class="btns"><button id="ugFit">Fit to deepest</button></div>
+        <label><input type="checkbox" id="ugXray" checked> X-ray (show workings through the earth)</label>
+        <label><input type="checkbox" id="ugWater" checked> Water table (estimated)</label>
+        <label><input type="checkbox" id="ugEsker" checked> Esker (sand &amp; gravel aquifer)</label>
+        <label><input type="checkbox" id="ugMines" checked> Mines &amp; deposits</label>
+        <label><input type="checkbox" id="ugDrill" checked> Drill holes</label>
+        <label><input type="checkbox" id="ugClaims" checked> Mining claims</label>
+        <div id="ugLegend"></div>
+      </details>
+    </section>
   </div>
 </div>
+<button type="button" id="uiOpen" aria-controls="ui" aria-expanded="false">Controls</button>
 <div id="hint">Left-drag to move · right-drag to orbit · scroll to zoom</div>
 <div id="perfHud" data-band="good">
   <div class="ph-main"><span id="phFps">--</span><span class="ph-unit">FPS</span><span id="phMs">--</span><span class="ph-unit">ms</span></div>

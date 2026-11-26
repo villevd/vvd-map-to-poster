@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   watch progress, view them interactively and reopen previous ones.
 
 ### Changed
+- 3D map on phones (villevd.ca/carte): the controls are a bottom sheet with four tabs (Map, Look, Weather, Underground)
+  behind a Controls button, instead of one long panel over the map. Desktop shows the same controls stacked; *Land a plane* moved
+  under Map and *Realistic view* moved above Weather.
 - `--distance` now defaults per mode: 18000 m for flat posters (unchanged), 1500 m with `--3d`.
 - Poster typography moved into `add_poster_labels()` so 2D and 3D posters share it (2D output is unchanged).
 
